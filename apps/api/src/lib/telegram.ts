@@ -127,29 +127,32 @@ export function startTelegramBot(redis: Redis, logger?: FastifyBaseLogger) {
             const firstName = msg.from?.first_name || 'Администратор';
 
             if (text.startsWith('/start')) {
-              // Сохраняем Chat ID в Redis
+              const currentBoundId = await redis.get(REDIS_CHAT_ID_KEY);
+              // Всегда актуализируем chat ID
               await redis.set(REDIS_CHAT_ID_KEY, String(chatId));
 
-              logger?.info({ chatId, username: msg.from?.username }, '[Telegram] Admin registered chat ID for 2FA');
-
-              const welcomeMsg = `
+              // Отправляем подтверждение только один раз, если не был привязан этот же chat_id
+              if (currentBoundId !== String(chatId)) {
+                logger?.info({ chatId, username: msg.from?.username }, '[Telegram] Admin registered new chat ID for 2FA');
+                const welcomeMsg = `
 👋 Здравствуйте, <b>${firstName}</b>!
 
 ✅ <b>Ваш Telegram успешно привязан к системе безопасности Ijarauz!</b>
-Теперь при входе в Супер-Административную панель вам сюда будут приходить 6-значные коды двухфакторной аутентификации (2FA).
-
-🆔 <b>Ваш Chat ID:</b> <code>${chatId}</code>
+Ваш Chat ID (<code>${chatId}</code>) сохранен в системе.
+Теперь бот будет присылать 6-значные коды 2FA только при попытке входа в админ-панель.
 `.trim();
-
-              await sendTelegramMessage(chatId, welcomeMsg, 'HTML');
+                await sendTelegramMessage(chatId, welcomeMsg, 'HTML');
+              }
             } else if (text.startsWith('/status')) {
               const savedChatId = await redis.get(REDIS_CHAT_ID_KEY);
               const isBound = savedChatId === String(chatId);
-              await sendTelegramMessage(
-                chatId,
-                isBound ? `✅ Бот активен и привязан к вашему аккаунту (Chat ID: <code>${chatId}</code>).` : `⚠️ Бот активен, но текущий Chat ID не совпадает с сохраненным. Нажмите /start.`,
-                'HTML',
-              );
+              if (isBound) {
+                await sendTelegramMessage(
+                  chatId,
+                  `✅ Бот активен и привязан. Коды 2FA отправляются сюда автоматически.`,
+                  'HTML',
+                );
+              }
             }
           }
         }
