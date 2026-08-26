@@ -42,18 +42,23 @@ export const pageSectionsModule: FastifyPluginAsync = async (server) => {
 
   const invalidateCache = async (pageKey: string) => {
     try {
-      await server.redis.del(`${REDIS_CACHE_PREFIX}${pageKey}`);
+      await server.redis.del(
+        `${REDIS_CACHE_PREFIX}${pageKey}`,
+        `${REDIS_CACHE_PREFIX}${pageKey}:ru`,
+        `${REDIS_CACHE_PREFIX}${pageKey}:uz`,
+        `${REDIS_CACHE_PREFIX}${pageKey}:en`,
+      );
     } catch (err) {
       server.log.warn({ err }, 'Failed to invalidate page sections Redis cache');
     }
   };
 
   /**
-   * GET /page-sections/public?pageKey=home — публичный эндпоинт для фронтенда с Redis-кэшированием
+   * GET /page-sections/public?pageKey=home&locale=ru — публичный эндпоинт для фронтенда с Redis-кэшированием
    */
   server.get('/public', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { pageKey = 'home' } = request.query as { pageKey?: string };
-    const cacheKey = `${REDIS_CACHE_PREFIX}${pageKey}`;
+    const { pageKey = 'home', locale = 'ru' } = request.query as { pageKey?: string; locale?: string };
+    const cacheKey = `${REDIS_CACHE_PREFIX}${pageKey}:${locale}`;
 
     // 1. Проверяем Redis кэш
     try {
@@ -85,14 +90,24 @@ export const pageSectionsModule: FastifyPluginAsync = async (server) => {
       },
     });
 
+    const localizedSections = sections.map((section) => {
+      const raw = section.content as Record<string, any> | null;
+      const localized =
+        raw && typeof raw[locale] === 'object' ? raw[locale] : raw || {};
+      return {
+        ...section,
+        content: localized,
+      };
+    });
+
     // 3. Сохраняем в кэш на 5 минут
     try {
-      await server.redis.setex(cacheKey, 300, JSON.stringify(sections));
+      await server.redis.setex(cacheKey, 300, JSON.stringify(localizedSections));
     } catch (err) {
       server.log.warn({ err }, 'Redis set error');
     }
 
-    return reply.header('X-Cache', 'MISS').send(sections);
+    return reply.header('X-Cache', 'MISS').send(localizedSections);
   });
 
   // ─── ADMIN ENDPOINTS ──────────────────────────────────────────────────────────
