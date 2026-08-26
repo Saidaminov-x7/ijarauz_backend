@@ -1,0 +1,350 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== ENUMS ==========
+
+enum Role {
+  USER
+  LANDLORD
+  ADMIN
+}
+
+/// Роли внутри административной панели
+enum AdminRole {
+  SUPER_ADMIN // Полный доступ ко всем настройкам, сотрудникам, maintenance
+  ADMIN       // Модерация, пользователи, аналитика, CMS (без сотрудников)
+  MODERATOR   // Модерация объявлений, просмотр пользователей
+  SUPPORT     // Read-only доступ к объявлениям и пользователям
+}
+
+enum ListingType {
+  APARTMENT
+  HOUSE
+  ROOM
+  COMMERCIAL
+  LAND
+}
+
+enum ListingStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+/// Статус модерации объявления (отдельный от ListingStatus)
+enum ModerationStatus {
+  PENDING           // Ожидает модерации
+  APPROVED          // Одобрено
+  REJECTED          // Отклонено
+  CHANGES_REQUESTED // Запрошены правки у автора
+}
+
+enum Amenity {
+  WIFI
+  PARKING
+  ELEVATOR
+  AIR_CONDITIONING
+  HEATING
+  BALCONY
+  PETS_ALLOWED
+  SECURITY
+  FURNITURE
+  KITCHEN
+  WASHING_MACHINE
+  GYM
+  POOL
+  SAUNA
+}
+
+enum MessageReadStatus {
+  DELIVERED
+  READ
+}
+
+// ========== MODELS ==========
+
+model User {
+  id               String      @id @default(uuid())
+  email            String      @unique
+  phone            String      @unique
+  passwordHash     String
+  name             String
+  avatar           String?
+  role             Role        @default(USER)
+  adminRole        AdminRole?              // Роль сотрудника в админке
+  lastLoginAt      DateTime?               // Дата последнего входа
+  verified         Boolean     @default(false)
+  isBlocked        Boolean     @default(false)  // Заблокирован ли пользователь
+  blockedAt        DateTime?                    // Дата блокировки
+  blockedReason    String?                      // Причина блокировки
+  refreshTokenHash String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  listings         Listing[]
+  favorites        Favorite[]
+  sentMessages     ChatMessage[] @relation("Sender")
+  receivedMessages ChatMessage[] @relation("Recipient")
+  aiSessions       AISession[]
+  media            Media[]
+  auditLogs        AuditLog[]
+  siteSettingsUpdates SiteSettings[] @relation("SiteSettingsUpdater")
+  themeSettingsUpdates ThemeSettings[]
+  pages            Page[]
+  createdSections  PageSection[] @relation("SectionCreator")
+  notifications    AdminNotification[] @relation("AdminNotifications")
+
+  @@index([email])
+  @@index([phone])
+  @@index([role])
+  @@index([adminRole])
+  @@index([isBlocked])
+}
+
+model Listing {
+  id               String           @id @default(uuid())
+  ownerId          String
+  owner            User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title            String
+  description      String
+  price            Decimal          @db.Decimal(12, 2)
+  type             ListingType
+  rooms            Int
+  area             Decimal          @db.Decimal(10, 2)
+  floor            Int?
+  totalFloors      Int?
+  lat              Float?
+  lng              Float?
+  city             String
+  district         String
+  address          String?
+  amenities        Amenity[]
+  images           Media[]
+  status           ListingStatus    @default(DRAFT)
+  moderationStatus ModerationStatus @default(PENDING) // Статус модерации
+  moderationNote   String?          // Комментарий/причина при модерации
+  viewsCount       Int              @default(0)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  favorites Favorite[]
+  messages  ChatMessage[]
+
+  @@index([ownerId])
+  @@index([city])
+  @@index([district])
+  @@index([price])
+  @@index([rooms])
+  @@index([status])
+  @@index([moderationStatus])
+  @@index([type])
+  @@index([createdAt])
+  @@index([viewsCount])
+}
+
+model Favorite {
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userId, listingId])
+  @@index([userId])
+  @@index([listingId])
+}
+
+model ChatMessage {
+  id          String            @id @default(uuid())
+  senderId    String
+  sender      User              @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId String
+  recipient   User              @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  listingId   String?
+  listing     Listing?          @relation(fields: [listingId], references: [id], onDelete: SetNull)
+  message     String
+  readStatus  MessageReadStatus @default(DELIVERED)
+  createdAt   DateTime          @default(now())
+
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([listingId])
+  @@index([createdAt])
+}
+
+model AISession {
+  id        String          @id @default(uuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String          @default("New Chat")
+  messages  AIChatMessage[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([userId])
+}
+
+model AIChatMessage {
+  id        String    @id @default(uuid())
+  sessionId String
+  session   AISession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  role      String    // "user" | "assistant"
+  content   String
+  model     String    @default("llama3")
+  timestamp DateTime  @default(now())
+
+  @@index([sessionId])
+  @@index([timestamp])
+}
+
+model Media {
+  id        String   @id @default(uuid())
+  url       String
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  listingId String?
+  listing   Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  mimeType  String
+  size      Int
+  width     Int?
+  height    Int?
+  hash      String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([ownerId])
+  @@index([listingId])
+  @@index([hash])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     String   // Тип действия: LISTING_APPROVED, USER_BLOCKED, SETTINGS_UPDATED и т.д.
+  resource   String?  // Тип ресурса: listing, user, page, settings
+  resourceId String?  // ID ресурса
+  meta       Json?    // Дополнительные данные (причина, старое/новое значение)
+  ip         String?
+  userAgent  String?
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+  @@index([action])
+  @@index([resource])
+}
+
+/// Настройки сайта — singleton-запись (id всегда "singleton")
+model SiteSettings {
+  id                    String   @id @default("singleton")
+  maintenanceMode       Boolean  @default(false)
+  maintenanceMessage    String?
+  siteName              String   @default("Ijarauz")
+  contactEmail          String   @default("support@ijarauz.uz")
+  contactPhone          String   @default("+998 71 200-00-00")
+  googleAuthEnabled     Boolean  @default(true)
+  autoModerationEnabled Boolean  @default(false)
+  maxImagesPerListing   Int      @default(10)
+  listingsPerPage       Int      @default(10)  // Количество объявлений на странице в админке
+  logoUrl               String?  // URL логотипа платформы
+  navLinks              Json?    // Навигационные ссылки для шапки/подвала
+  updatedAt             DateTime @updatedAt
+  updatedById           String?
+  updatedBy             User?    @relation("SiteSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Дизайн-токены для темы сайта
+model ThemeSettings {
+  id            String   @id @default("singleton")
+  primaryColor  String   @default("#14b8a6")  // teal-600
+  secondaryColor String  @default("#0f766e")  // teal-800
+  backgroundColor String @default("#f9fafb")  // gray-50
+  textColor     String   @default("#111827")  // gray-900
+  borderRadius String   @default("0.75rem")  // rounded-xl
+  fontFamily    String   @default("Inter, sans-serif")
+  updatedAt     DateTime @updatedAt
+  updatedById   String?
+  updatedBy     User?    @relation(fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Динамические страницы сайта, создаваемые из админки
+model Page {
+  id                String   @id @default(uuid())
+  slug              String   @unique // Используется в URL /pages/:slug
+  title             String
+  content           String   // Markdown текст страницы
+  locale            String   @default("ru") // ru/uz/en
+  isPublished       Boolean  @default(false)
+  isUnderMaintenance Boolean @default(false) // Страница на обслуживании
+  authorId          String?
+  author            User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([slug])
+  @@index([isPublished])
+  @@index([locale])
+}
+
+/// Лог уникальных визитов для честной аналитики без задваивания
+model VisitLog {
+  id        String   @id @default(uuid())
+  deviceId  String   // Уникальный персистентный идентификатор устройства (UUID из localStorage)
+  dayKey    String   // Ключ дня в формате "YYYY-MM-DD" для быстрой дедупликации
+  path      String   // Путь посещенной страницы
+  ip        String?  // IP-адрес
+  userAgent String?  // User-Agent браузера
+  createdAt DateTime @default(now())
+
+  @@unique([deviceId, dayKey]) // Гарантия: одно устройство считается 1 раз в сутки
+  @@index([dayKey])
+  @@index([createdAt])
+  @@index([path])
+}
+
+/// Секции конструктора страниц (Page Builder / CMS)
+model PageSection {
+  id                String   @id @default(uuid())
+  pageKey           String   @default("home") // Ключ страницы ("home" для главной)
+  sectionType       String   // HERO_SEARCH, BENEFITS, POPULAR_LISTINGS, CTA_BANNER, CATEGORIES
+  title             String?  // Название секции (для админки)
+  order             Int      @default(0)      // Порядок отображения (0, 1, 2...)
+  isVisible         Boolean  @default(true)   // Видимость на сайте
+  isUnderMaintenance Boolean  @default(false)  // Секция на обслуживании
+  layoutRow         Int?     @default(1)      // Номер строки для flex-layout (1, 2, 3...)
+  width             Int?     @default(12)     // Ширина секции в колонках (1-12)
+  content     Json                      // Гибкий JSON с контентом и настройками секции (мультиязычный: { ru, uz, en })
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  updatedById       String?
+  updatedBy         User?    @relation("SectionCreator", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([pageKey, order])
+  @@index([pageKey, isVisible])
+}
+
+/// Системные уведомления для администраторов
+model AdminNotification {
+  id            String   @id @default(uuid())
+  type          String   // NEW_LISTING, NEW_USER, LISTING_REPORT, SYSTEM
+  title         String   // Заголовок уведомления
+  message       String   // Текст сообщения
+  link          String?  // Ссылка для перехода в админке
+  isRead        Boolean  @default(false)
+  targetAdminId String?  // ID конкретного администратора (null = всем)
+  targetAdmin   User?    @relation("AdminNotifications", fields: [targetAdminId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([targetAdminId])
+}

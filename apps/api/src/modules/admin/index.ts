@@ -1,0 +1,547 @@
+// apps/api/src/modules/admin/index.ts
+// Главный файл модуля — регистрирует все admin-маршруты
+
+import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import { AdminRole } from '@prisma/client';
+import { adminMiddleware, requireAdminRole } from '../../lib/adminMiddleware';
+import { updateListingSchema } from '../listings/schemas';
+import { AdminService } from './service';
+import {
+  adminListingsFilterSchema,
+  adminUsersFilterSchema,
+  rejectListingSchema,
+  requestChangesSchema,
+  blockUserSchema,
+  changeRoleSchema,
+  createPageSchema,
+  updatePageSchema,
+  updateSiteSettingsSchema,
+  trafficFilterSchema,
+} from './schemas';
+
+export const adminModule: FastifyPluginAsync = async (server) => {
+  // Все маршруты требуют роли ADMIN
+  const preHandler = [adminMiddleware];
+  // Роли для каждого типа действий
+  const listingActionHandler = [requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.ADMIN, AdminRole.MODERATOR)];
+  const userActionHandler = [requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.ADMIN)];
+  const cmsHandler = [requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.ADMIN)];
+  const settingsHandler = [requireAdminRole(AdminRole.SUPER_ADMIN)];
+  const analyticsHandler = [requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.ADMIN)];
+  const supportHandler = [requireAdminRole(AdminRole.SUPER_ADMIN, AdminRole.ADMIN, AdminRole.MODERATOR, AdminRole.SUPPORT)];
+
+  // Сервис создаётся на каждый запрос (получает актуальный prisma instance)
+  const getService = (req: FastifyRequest) => new AdminService(req.server.prisma);
+
+  // ─── ОБЪЯВЛЕНИЯ ──────────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/listings — список всех объявлений с фильтрами
+   */
+  server.get('/listings', { preHandler: supportHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const filter = adminListingsFilterSchema.parse(request.query);
+    const service = getService(request);
+    return service.getListings(filter);
+  });
+
+  /**
+   * PATCH /admin/listings/:id/approve — одобрить объявление
+   */
+  server.patch<{ Params: { id: string } }>('/listings/:id/approve', { preHandler: listingActionHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      const result = await service.approveListing(request.params.id, request.user.userId, request.ip);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/listings/:id/reject — отклонить объявление (с причиной)
+   */
+  server.patch<{ Params: { id: string } }>('/listings/:id/reject', { preHandler: listingActionHandler }, async (request, reply) => {
+    const dto = rejectListingSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      const result = await service.rejectListing(request.params.id, dto.reason, request.user.userId, request.ip);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/listings/:id/request-changes — запросить правки у автора
+   */
+  server.patch<{ Params: { id: string } }>('/listings/:id/request-changes', { preHandler: listingActionHandler }, async (request, reply) => {
+    const dto = requestChangesSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      const result = await service.requestListingChanges(
+        request.params.id,
+        dto.comment,
+        request.user.userId,
+        request.ip,
+      );
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/users — список пользователей с фильтрами
+   */
+  server.get('/users', { preHandler: userActionHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const filter = adminUsersFilterSchema.parse(request.query);
+    const service = getService(request);
+    try {
+      const result = await service.getUsers(filter);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/users/export — экспорт пользователей в CSV
+   */
+  server.get('/users/export', { preHandler: userActionHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const filter = adminUsersFilterSchema.parse(request.query);
+    const service = getService(request);
+    const users = await service.exportUsers(filter);
+    try {
+      const headers = ['ID', 'Имя', 'Email', 'Телефон', 'Роль', 'Объявлений', 'Статус', 'Дата регистрации'];
+      const rows = users.map((u) => [u.id, u.name, u.email, u.phone, u.role, u._count.listings, u.isBlocked ? 'Заблокирован' : 'Активен', u.createdAt.toISOString()]);
+      const escapeCsv = (value: unknown) => {
+        const text = String(value ?? '');
+        return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+      };
+      const csv = [headers, ...rows].map((row) => row.map(escapeCsv).join(',')).join('\n');
+      reply.header('Content-Type', 'text/csv; charset=utf-8');
+      reply.header('Content-Disposition', 'attachment; filename="users.csv"');
+      return reply.send('\uFEFF' + csv);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/users/:id — детальная карточка пользователя
+   */
+  server.get<{ Params: { id: string } }>('/users/:id', { preHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      return await service.getUserById(request.params.id);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/users/:id/block — заблокировать пользователя
+   */
+  server.patch<{ Params: { id: string } }>('/users/:id/block', { preHandler: userActionHandler }, async (request, reply) => {
+    const dto = blockUserSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      return await service.blockUser(request.params.id, dto.reason, request.user.userId, request.ip);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/users/:id/unblock — разблокировать пользователя
+   */
+  server.patch<{ Params: { id: string } }>('/users/:id/unblock', { preHandler: userActionHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      return await service.unblockUser(request.params.id, request.user.userId, request.ip);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/users/:id/role — изменить роль пользователя
+   */
+  server.patch<{ Params: { id: string } }>('/users/:id/role', { preHandler: settingsHandler }, async (request, reply) => {
+    const dto = changeRoleSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      return await service.changeUserRole(request.params.id, dto.role, request.user.userId, request.ip);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  // ─── АУДИТ-ЛОГИ ───────────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/audit-logs — логи действий пользователя
+   */
+  server.get('/audit-logs', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const { userId } = request.query as { userId?: string };
+    const service = getService(request);
+    return service.getAuditLogs(userId);
+  });
+
+  // ─── СТАТИСТИКА ───────────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/stats/overview — метрики дашборда
+   */
+  server.get('/stats/overview', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getOverviewStats();
+  });
+
+  /**
+   * GET /admin/stats/traffic?days=30 — посещаемость по дням
+   */
+  server.get('/stats/traffic', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const { days } = trafficFilterSchema.parse(request.query);
+    const service = getService(request);
+    return service.getTrafficStats(days);
+  });
+
+  /**
+   * GET /admin/stats/listings-by-city — объявления по городам
+   */
+  server.get('/stats/listings-by-city', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getListingsByCity();
+  });
+
+  /**
+   * GET /admin/stats/activity-feed — лента последних действий
+   */
+  server.get('/stats/activity-feed', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getActivityFeed(20);
+  });
+
+  /**
+   * GET /admin/stats/top-listings — топ объявлений по просмотрам
+   */
+  server.get('/stats/top-listings', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getTopListings();
+  });
+
+  /**
+   * GET /admin/stats/recent-complaints — последние жалобы на объявления
+   */
+  server.get('/stats/recent-complaints', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getRecentComplaints();
+  });
+
+  /**
+   * GET /admin/stats/moderation — конверсия модерации (одобрено/отклонено/pending)
+   */
+  server.get('/stats/moderation', { preHandler: analyticsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getModerationStats();
+  });
+
+  // ─── СТРАНИЦЫ ────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/pages — список всех динамических страниц
+   */
+  server.get('/pages', { preHandler: cmsHandler }, async (request: FastifyRequest) => {
+    const { page = 1, limit = 50 } = request.query as { page?: number; limit?: number };
+    const service = getService(request);
+    return service.getPages({ page: Number(page), limit: Number(limit) });
+  });
+
+  /**
+   * GET /admin/pages/:id — одна страница
+   */
+  server.get<{ Params: { id: string } }>('/pages/:id', { preHandler: cmsHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      return await service.getPageById(request.params.id);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * POST /admin/pages — создать страницу
+   */
+  server.post('/pages', { preHandler: cmsHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const dto = createPageSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      const page = await service.createPage(dto, request.user.userId);
+      return reply.status(201).send(page);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/pages/:id — обновить страницу
+   */
+  server.patch<{ Params: { id: string } }>('/pages/:id', { preHandler: cmsHandler }, async (request, reply) => {
+    const dto = updatePageSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      return await service.updatePage(request.params.id, dto, request.user.userId);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * PATCH /admin/pages/:id/maintenance — переключить режим обслуживания страницы
+   */
+  server.patch<{ Params: { id: string } }>('/pages/:id/maintenance', { preHandler: settingsHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      const page = await service.togglePageMaintenance(request.params.id, request.user.userId);
+      return page;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * DELETE /admin/pages/:id — удалить страницу
+   */
+  server.delete<{ Params: { id: string } }>('/pages/:id', { preHandler: cmsHandler }, async (request, reply) => {
+    const service = getService(request);
+    try {
+      await service.deletePage(request.params.id, request.user.userId);
+      return reply.status(204).send();
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  // ─── НАСТРОЙКИ САЙТА ─────────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/site-settings — получить текущие настройки
+   */
+  server.get('/site-settings', { preHandler: settingsHandler }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getSiteSettings();
+  });
+
+  /**
+   * PATCH /admin/site-settings — обновить настройки
+   */
+  server.patch('/site-settings', { preHandler: settingsHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const dto = updateSiteSettingsSchema.parse(request.body);
+    const service = getService(request);
+
+    const settings = await service.updateSiteSettings(dto, request.user.userId, request.ip);
+
+    // Инвалидируем Redis кэш публичных настроек
+    await request.server.redis.del('site:settings:public');
+
+    return settings;
+  });
+
+  /**
+   * POST /admin/site-settings/logo — загрузить логотип
+   */
+  server.post('/site-settings/logo', {
+    preHandler: settingsHandler,
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const data = await request.file({
+      limits: { fileSize: 10 * 1024 * 1024 },
+    });
+    if (!data) {
+      return reply.status(400).send({ message: 'No file uploaded' });
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of data.file) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    const buffer = Buffer.concat(chunks);
+
+    const service = getService(request);
+    try {
+      const result = await service.uploadSiteLogo(
+        { filename: data.filename, mimetype: data.mimetype, data: buffer },
+        request.user.userId,
+        request.ip,
+      );
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * DELETE /admin/site-settings/logo — удалить логотип
+   */
+  server.delete('/site-settings/logo', { preHandler: settingsHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const service = getService(request);
+    try {
+      const result = await service.deleteSiteLogo(request.user.userId, request.ip);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  // ─── ЭКСПОРТ АНАЛИТИКИ ──────────────────────────────────────────────────────
+
+  /**
+   * GET /admin/analytics/export — экспорт отчётов аналитики в CSV
+   */
+  server.get('/analytics/export', { preHandler: analyticsHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { type, from, to } = request.query as { type?: string; from?: string; to?: string };
+
+    if (!type || !from || !to) {
+      return reply.status(400).send({ message: 'Missing required parameters: type, from, to' });
+    }
+
+    const service = getService(request);
+    const dateFrom = new Date(from);
+    const dateTo = new Date(to);
+
+    let csvData: string;
+    let filename: string;
+
+    try {
+      switch (type) {
+        case 'traffic': {
+          // Посуточная статистика трафика
+          const days = Math.ceil((dateTo.getTime() - dateFrom.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+          const trafficStats = await service.getTrafficStats(days);
+          
+          // Фильтруем по диапазону дат
+          const filteredStats = trafficStats.filter(s => {
+            const statDate = new Date(s.date);
+            return statDate >= dateFrom && statDate <= dateTo;
+          });
+
+          const headers = ['Дата', 'Посетители', 'Регистрации', 'Объявления'];
+          const rows = filteredStats.map(s => [
+            s.date,
+            s.visitors,
+            s.registrations,
+            s.listings,
+          ]);
+
+          const escapeCsv = (value: unknown) => {
+            const text = String(value ?? '');
+            return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          };
+          csvData = [headers, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
+          filename = `traffic-report-${from}-${to}.csv`;
+          break;
+        }
+
+        case 'visitors': {
+          // Журнал уникальных посетителей из VisitLog
+          const visits = await service.prisma.visitLog.findMany({
+            where: {
+              createdAt: {
+                gte: dateFrom,
+                lte: dateTo,
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 10000,
+          });
+
+          const headers = ['ID', 'Device ID', 'Day Key', 'IP Address', 'User Agent', 'Page', 'Created At'];
+          const rows = visits.map(v => [
+            v.id,
+            v.deviceId,
+            v.dayKey,
+            v.ip,
+            v.userAgent?.substring(0, 100) || '',
+            v.path,
+            v.createdAt.toISOString(),
+          ]);
+
+          const escapeCsv = (value: unknown) => {
+            const text = String(value ?? '');
+            return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          };
+          csvData = [headers, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
+          filename = `visitors-report-${from}-${to}.csv`;
+          break;
+        }
+
+        case 'listings': {
+          // Реестр объявлений за период
+          const listings = await service.prisma.listing.findMany({
+            where: {
+              createdAt: {
+                gte: dateFrom,
+                lte: dateTo,
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              title: true,
+              city: true,
+              price: true,
+              status: true,
+              moderationStatus: true,
+              createdAt: true,
+            },
+          });
+
+          const headers = ['ID', 'Название', 'Город', 'Цена', 'Статус', 'Модерация', 'Дата создания'];
+          const rows = listings.map(l => [
+            l.id,
+            l.title,
+            l.city,
+            l.price,
+            l.status,
+            l.moderationStatus,
+            l.createdAt.toISOString(),
+          ]);
+
+          const escapeCsv = (value: unknown) => {
+            const text = String(value ?? '');
+            return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+          };
+          csvData = [headers, ...rows].map(r => r.map(escapeCsv).join(',')).join('\n');
+          filename = `listings-report-${from}-${to}.csv`;
+          break;
+        }
+
+        default:
+          return reply.status(400).send({ message: 'Invalid report type' });
+      }
+
+      reply.header('Content-Type', 'text/csv; charset=utf-8');
+      reply.header('Content-Disposition', `attachment; filename="${filename}"`);
+      return reply.send('\uFEFF' + csvData); // BOM для корректного отображения кириллицы
+    } catch (err) {
+      const error = err as Error;
+      return reply.status(500).send({ message: `Failed to generate export: ${error.message}` });
+    }
+  });
+};
