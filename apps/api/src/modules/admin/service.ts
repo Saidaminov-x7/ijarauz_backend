@@ -221,6 +221,95 @@ export class AdminService {
     });
   }
 
+  /**
+   * Присвоить/снять статус "Проверено Ijarauz"
+   */
+  async verifyListing(id: string, isVerified: boolean, adminId: string, ip?: string) {
+    const listing = await this.prisma.listing.findUnique({ where: { id } });
+    if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
+
+    const updated = await this.prisma.listing.update({
+      where: { id },
+      data: {
+        isVerified,
+        verifiedAt: isVerified ? new Date() : null,
+        verifiedBy: isVerified ? adminId : null,
+      },
+    });
+
+    await this.log({
+      adminId,
+      action: isVerified ? 'LISTING_VERIFIED' : 'LISTING_UNVERIFIED',
+      resource: 'listing',
+      resourceId: id,
+      meta: { title: listing.title, isVerified },
+      ip,
+      userAgent: 'admin-panel',
+    });
+
+    return updated;
+  }
+
+  /**
+   * Получить список жалоб на объявления
+   */
+  async getReports(params: { status?: 'OPEN' | 'RESOLVED' | 'DISMISSED'; page?: number; limit?: number }) {
+    const { status, page = 1, limit = 20 } = params;
+    const skip = (page - 1) * limit;
+
+    const where = status ? { status } : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.listingReport.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          listing: {
+            select: {
+              id: true,
+              title: true,
+              city: true,
+              price: true,
+              status: true,
+              images: { select: { url: true }, take: 1 },
+              owner: { select: { id: true, name: true, email: true } },
+            },
+          },
+          reporter: { select: { id: true, name: true, email: true } },
+        },
+      }),
+      this.prisma.listingReport.count({ where }),
+    ]);
+
+    return { items, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
+  /**
+   * Обновить статус жалобы
+   */
+  async updateReportStatus(id: string, status: 'OPEN' | 'RESOLVED' | 'DISMISSED', adminId: string, ip?: string) {
+    const report = await this.prisma.listingReport.findUnique({ where: { id } });
+    if (!report) throw Object.assign(new Error('Report not found'), { statusCode: 404 });
+
+    const updated = await this.prisma.listingReport.update({
+      where: { id },
+      data: { status },
+    });
+
+    await this.log({
+      adminId,
+      action: `REPORT_${status}`,
+      resource: 'report',
+      resourceId: id,
+      meta: { listingId: report.listingId, status },
+      ip,
+      userAgent: 'admin-panel',
+    });
+
+    return updated;
+  }
+
   // ─── Пользователи ────────────────────────────────────────────────────────────
 
   async getUsers(filter: AdminUsersFilterDto) {

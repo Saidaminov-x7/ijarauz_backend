@@ -31,6 +31,36 @@ export enum ListingStatus {
 }
 
 /**
+ * Уровни продвижения (VIP/Boost)
+ */
+export enum PromotionTier {
+  BASIC = 'BASIC',
+  TOP = 'TOP',
+  URGENT = 'URGENT',
+}
+
+/**
+ * Причины жалоб на объявления
+ */
+export enum ReportReason {
+  SCAM = 'SCAM',
+  ALREADY_RENTED = 'ALREADY_RENTED',
+  WRONG_PRICE = 'WRONG_PRICE',
+  WRONG_PHOTOS = 'WRONG_PHOTOS',
+  DUPLICATE = 'DUPLICATE',
+  OTHER = 'OTHER',
+}
+
+/**
+ * Статусы обработки жалоб
+ */
+export enum ReportStatus {
+  OPEN = 'OPEN',
+  RESOLVED = 'RESOLVED',
+  DISMISSED = 'DISMISSED',
+}
+
+/**
  * Удобства недвижимости
  */
 export enum Amenity {
@@ -106,6 +136,12 @@ export interface ListingItem {
   amenities: Amenity[];
   images?: MediaItem[];
   status: ListingStatus;
+  isPromoted?: boolean;
+  promotedUntil?: string | null;
+  promotionTier?: PromotionTier | null;
+  isVerified?: boolean;
+  verifiedAt?: string | null;
+  verifiedBy?: string | null;
   viewsCount: number;
   createdAt: string;
   updatedAt?: string;

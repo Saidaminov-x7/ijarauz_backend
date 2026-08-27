@@ -40,12 +40,34 @@ enum ListingStatus {
   DELETED
 }
 
+/// Уровни продвижения (Boost/VIP)
+enum PromotionTier {
+  BASIC   // вверху своей категории
+  TOP     // топ всей выдачи + бейдж
+  URGENT  // бейдж "Срочно" + подсветка карточки
+}
+
 /// Статус модерации объявления (отдельный от ListingStatus)
 enum ModerationStatus {
   PENDING           // Ожидает модерации
   APPROVED          // Одобрено
   REJECTED          // Отклонено
   CHANGES_REQUESTED // Запрошены правки у автора
+}
+
+enum ReportReason {
+  SCAM
+  ALREADY_RENTED
+  WRONG_PRICE
+  WRONG_PHOTOS
+  DUPLICATE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
 }
 
 enum Amenity {
@@ -92,6 +114,8 @@ model User {
 
   listings         Listing[]
   favorites        Favorite[]
+  savedSearches    SavedSearch[]
+  reportsSubmitted ListingReport[] @relation("ReportedByUser")
   sentMessages     ChatMessage[] @relation("Sender")
   receivedMessages ChatMessage[] @relation("Recipient")
   aiSessions       AISession[]
@@ -133,11 +157,24 @@ model Listing {
   moderationStatus ModerationStatus @default(PENDING) // Статус модерации
   moderationNote   String?          // Комментарий/причина при модерации
   viewsCount       Int              @default(0)
+
+  // Продвижение и VIP
+  isPromoted       Boolean          @default(false)
+  promotedUntil    DateTime?
+  promotionTier    PromotionTier?
+
+  // Верификация Ijarauz
+  isVerified       Boolean          @default(false)
+  verifiedAt       DateTime?
+  verifiedBy       String?
+
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  favorites Favorite[]
-  messages  ChatMessage[]
+  favorites        Favorite[]
+  messages         ChatMessage[]
+  reports          ListingReport[]
+  priceHistory     PriceHistory[]
 
   @@index([ownerId])
   @@index([city])
@@ -147,6 +184,8 @@ model Listing {
   @@index([status])
   @@index([moderationStatus])
   @@index([type])
+  @@index([isPromoted, promotedUntil])
+  @@index([isVerified])
   @@index([createdAt])
   @@index([viewsCount])
 }
@@ -161,6 +200,47 @@ model Favorite {
   @@id([userId, listingId])
   @@index([userId])
   @@index([listingId])
+}
+
+model SavedSearch {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  filters        Json      // { city, district, minPrice, maxPrice, rooms, type, amenities }
+  isActive       Boolean   @default(true)
+  lastNotifiedAt DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([isActive])
+}
+
+model ListingReport {
+  id         String       @id @default(uuid())
+  listingId  String
+  listing    Listing      @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  reporterId String?
+  reporter   User?        @relation("ReportedByUser", fields: [reporterId], references: [id], onDelete: SetNull)
+  reason     ReportReason
+  comment    String?
+  status     ReportStatus @default(OPEN)
+  createdAt  DateTime     @default(now())
+
+  @@index([listingId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PriceHistory {
+  id        String   @id @default(uuid())
+  listingId String
+  listing   Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  price     Decimal  @db.Decimal(12, 2)
+  changedAt DateTime @default(now())
+
+  @@index([listingId])
+  @@index([changedAt])
 }
 
 model ChatMessage {

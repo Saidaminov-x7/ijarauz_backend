@@ -250,7 +250,7 @@ export class ListingsService {
         where,
         skip,
         take: limit,
-        orderBy: { [sortBy]: sortOrder },
+        orderBy: [{ isPromoted: 'desc' }, { [sortBy]: sortOrder }],
         include: {
           owner: { select: { id: true, name: true, avatar: true } },
           images: { select: { id: true, url: true, mimeType: true } },
@@ -318,6 +318,16 @@ export class ListingsService {
 
     const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
     const isAutoModerated = settings?.autoModerationEnabled === true;
+
+    // Если цена изменилась — фиксируем в истории цен
+    if (dto.price !== undefined && Number(dto.price) !== Number(existing.price)) {
+      await this.prisma.priceHistory.create({
+        data: {
+          listingId: id,
+          price: dto.price,
+        },
+      });
+    }
 
     return this.prisma.listing.update({
       where: { id },
@@ -443,44 +453,162 @@ export class ListingsService {
       throw Object.assign(new Error('Only DRAFT listings can be published'), { statusCode: 400 });
     }
 
-    // Проверяем настройки автомодерации
-    const settings = await this.prisma.siteSettings.findUnique({
-      where: { id: 'singleton' },
-    });
+    const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
+    const isAutoModerated = settings?.autoModerationEnabled === true;
 
-    const updateData: Prisma.ListingUpdateInput = {
-      status: ListingStatus.ACTIVE,
-      moderationStatus: settings?.autoModerationEnabled ? ModerationStatus.APPROVED : ModerationStatus.PENDING,
-    };
-
-    const updated = await this.prisma.listing.update({
+    return this.prisma.listing.update({
       where: { id },
-      data: updateData,
+      data: {
+        status: ListingStatus.ACTIVE,
+        moderationStatus: isAutoModerated ? ModerationStatus.APPROVED : ModerationStatus.PENDING,
+      },
+    });
+  }
+
+  /**
+   * Продвижение объявления (Boost/VIP)
+   */
+  async promote(
+    listingId: string,
+    ownerId: string,
+    tier: 'BASIC' | 'TOP' | 'URGENT',
+    days: number,
+  ): Promise<Listing> {
+    const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });
+    if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
+    if (listing.ownerId !== ownerId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+
+    const promotedUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    return this.prisma.listing.update({
+      where: { id: listingId },
+      data: {
+        isPromoted: true,
+        promotedUntil,
+        promotionTier: tier,
+      },
+    });
+  }
+
+  /**
+   * Похожие объявления рядом (в том же городе/районе и ценовом диапазоне ±30%)
+   */
+  async getSimilar(id: string, limit = 6) {
+    const listing = await this.prisma.listing.findUnique({ where: { id } });
+    if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
+
+    const numericPrice = Number(listing.price);
+    const minPrice = numericPrice * 0.7;
+    const maxPrice = numericPrice * 1.3;
+
+    return this.prisma.listing.findMany({
+      where: {
+        id: { not: listing.id },
+        city: listing.city,
+        ...(listing.district ? { district: listing.district } : {}),
+        status: ListingStatus.ACTIVE,
+        moderationStatus: ModerationStatus.APPROVED,
+        price: { gte: minPrice, lte: maxPrice },
+      },
+      take: limit,
+      orderBy: [{ isPromoted: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        images: { select: { id: true, url: true, mimeType: true } },
+        owner: { select: { id: true, name: true, avatar: true } },
+        _count: { select: { favorites: true } },
+      },
+    });
+  }
+
+  /**
+   * Отправить жалобу на объявление
+   */
+  async createReport(
+    listingId: string,
+    reporterId: string | null,
+    reason: 'SCAM' | 'ALREADY_RENTED' | 'WRONG_PRICE' | 'WRONG_PHOTOS' | 'DUPLICATE' | 'OTHER',
+    comment?: string,
+  ) {
+    const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });
+    if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
+
+    const report = await this.prisma.listingReport.create({
+      data: {
+        listingId,
+        reporterId,
+        reason,
+        comment,
+      },
     });
 
-    // Если включена автомодерация — создаём уведомление об одобрении
-    if (settings?.autoModerationEnabled) {
-      await this.prisma.adminNotification.create({
-        data: {
-          targetAdminId: ownerId,
-          type: 'LISTING_APPROVED',
-          title: 'Объявление одобрено',
-          message: `Ваше объявление "${existing.title}" было автоматически одобрено и опубликовано.`, 
-          link: `/profile/listings/${id}`,
+    await this.prisma.adminNotification.create({
+      data: {
+        type: 'LISTING_REPORT',
+        title: 'Новая жалоба на объявление',
+        message: `Жалоба (${reason}) на объявление "${listing.title}". ${comment || ''}`,
+        link: `/listings/${listingId}`,
+      },
+    });
+
+    return report;
+  }
+
+  /**
+   * AI и статистическая оценка справедливой цены аренды
+   */
+  async estimateFairPrice(input: {
+    city: string;
+    district?: string;
+    rooms: number;
+    area: number;
+    type: string;
+  }) {
+    const comparables = await this.prisma.listing.findMany({
+      where: {
+        city: { contains: input.city, mode: 'insensitive' },
+        ...(input.district ? { district: { contains: input.district, mode: 'insensitive' } } : {}),
+        rooms: input.rooms,
+        status: ListingStatus.ACTIVE,
+        moderationStatus: ModerationStatus.APPROVED,
+        area: {
+          gte: input.area * 0.75,
+          lte: input.area * 1.25,
         },
-      });
-    } else {
-      // Иначе — уведомление администраторам о новом объявлении на модерации
-      await this.prisma.adminNotification.create({
-        data: {
-          type: 'NEW_LISTING',
-          title: 'Новое объявление на модерации',
-          message: `Объявление "${existing.title}" ожидает модерации.`, 
-          link: `/listings?moderationStatus=PENDING`,
-        },
-      });
+      },
+      select: { price: true },
+      take: 50,
+    });
+
+    if (comparables.length < 2) {
+      return {
+        min: null,
+        max: null,
+        average: null,
+        confidence: 'low',
+        sampleSize: comparables.length,
+      };
     }
 
-    return updated;
+    const prices = comparables.map((c) => Number(c.price)).sort((a, b) => a - b);
+    const p25 = prices[Math.floor(prices.length * 0.25)];
+    const p75 = prices[Math.floor(prices.length * 0.75)];
+    const avg = Math.round(prices.reduce((sum, p) => sum + p, 0) / prices.length);
+
+    return {
+      min: p25,
+      max: p75,
+      average: avg,
+      confidence: comparables.length >= 10 ? 'high' : 'medium',
+      sampleSize: comparables.length,
+    };
+  }
+
+  /**
+   * История изменения цены объявления
+   */
+  async getPriceHistory(listingId: string) {
+    return this.prisma.priceHistory.findMany({
+      where: { listingId },
+      orderBy: { changedAt: 'asc' },
+    });
   }
 }

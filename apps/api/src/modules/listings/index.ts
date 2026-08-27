@@ -7,6 +7,9 @@ import {
   createListingSchema,
   updateListingSchema,
   listingsFilterSchema,
+  promoteListingSchema,
+  reportListingSchema,
+  estimatePriceSchema,
   CreateListingDto,
   UpdateListingDto,
 } from './schemas';
@@ -23,6 +26,15 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
     const filter = listingsFilterSchema.parse(request.query);
     const service = getService(request);
     return service.findMany(filter);
+  });
+
+  /**
+   * POST /listings/estimate-price — статистическая/AI оценка справедливой стоимости
+   */
+  server.post('/estimate-price', async (request: FastifyRequest) => {
+    const dto = estimatePriceSchema.parse(request.body);
+    const service = getService(request);
+    return service.estimateFairPrice(dto);
   });
 
   // ─── Защищённые маршруты для личного кабинета (регистрируются ДО /:id) ─
@@ -50,6 +62,48 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
   });
 
   /**
+   * GET /listings/:id/similar — похожие объявления в том же районе/цене
+   */
+  server.get<{ Params: { id: string } }>('/:id/similar', async (request, reply) => {
+    const service = getService(request);
+    try {
+      return await service.getSimilar(request.params.id);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * GET /listings/:id/price-history — история изменения цены
+   */
+  server.get<{ Params: { id: string } }>('/:id/price-history', async (request) => {
+    const service = getService(request);
+    return service.getPriceHistory(request.params.id);
+  });
+
+  /**
+   * POST /listings/:id/report — отправить жалобу на объявление
+   */
+  server.post<{ Params: { id: string } }>('/:id/report', async (request, reply) => {
+    const dto = reportListingSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      const reporterId = (request as any).user?.userId || null;
+      const report = await service.createReport(
+        request.params.id,
+        reporterId,
+        dto.reason,
+        dto.comment,
+      );
+      return reply.status(201).send(report);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
    * GET /listings/:id — детали объявления
    */
   server.get<{ Params: { id: string } }>('/:id', async (request, reply) => {
@@ -73,6 +127,28 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
     const service = getService(request);
     const listing = await service.create(request.user.userId, dto);
     return reply.status(201).send(listing);
+  });
+
+  /**
+   * POST /listings/:id/promote — продвижение (Boost/VIP)
+   */
+  server.post<{ Params: { id: string } }>('/:id/promote', {
+    preHandler: [authMiddleware],
+  }, async (request, reply) => {
+    const dto = promoteListingSchema.parse(request.body);
+    const service = getService(request);
+    try {
+      const updated = await service.promote(
+        request.params.id,
+        request.user.userId,
+        dto.tier,
+        dto.days,
+      );
+      return updated;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
   });
 
   /**

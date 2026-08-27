@@ -1,7 +1,7 @@
 // apps/api/src/modules/listings/schemas.ts
 
 import { z } from 'zod';
-import { ListingType, ListingStatus, Amenity } from '@prisma/client';
+import { ListingType, ListingStatus, Amenity, PromotionTier, ReportReason } from '@prisma/client';
 
 // Справочник городов и районов для валидации
 const knownDistricts: Record<string, string[]> = {
@@ -51,7 +51,6 @@ export const createListingSchema = createListingBaseSchema.superRefine((value, c
 export type CreateListingDto = z.infer<typeof createListingSchema>;
 
 export const updateListingSchema = createListingBaseSchema.partial().extend({
-  // Note: status is accepted for backward compatibility with clients but is ignored by ListingsService (status transitions handled via publish / moderation)
   status: z.nativeEnum(ListingStatus).optional(),
 });
 
@@ -79,3 +78,27 @@ export const listingsFilterSchema = z.object({
 });
 
 export type ListingsFilterDto = z.infer<typeof listingsFilterSchema>;
+
+export const promoteListingSchema = z.object({
+  tier: z.nativeEnum(PromotionTier).default(PromotionTier.BASIC),
+  days: z.coerce.number().int().min(1).max(365).default(7),
+});
+
+export type PromoteListingDto = z.infer<typeof promoteListingSchema>;
+
+export const reportListingSchema = z.object({
+  reason: z.nativeEnum(ReportReason),
+  comment: z.string().max(500).optional(),
+});
+
+export type ReportListingDto = z.infer<typeof reportListingSchema>;
+
+export const estimatePriceSchema = z.object({
+  city: z.string().min(2),
+  district: z.string().optional(),
+  rooms: z.coerce.number().int().min(0),
+  area: z.coerce.number().positive(),
+  type: z.string().default('APARTMENT'),
+});
+
+export type EstimatePriceDto = z.infer<typeof estimatePriceSchema>;

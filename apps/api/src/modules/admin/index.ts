@@ -94,6 +94,45 @@ export const adminModule: FastifyPluginAsync = async (server) => {
   });
 
   /**
+   * PATCH /admin/listings/:id/verify — присвоить/снять статус 'Проверено Ijarauz'
+   */
+  server.patch<{ Params: { id: string }; Body: { isVerified?: boolean } }>('/listings/:id/verify', { preHandler: listingActionHandler }, async (request, reply) => {
+    const service = getService(request);
+    const isVerified = (request.body as { isVerified?: boolean })?.isVerified ?? true;
+    try {
+      const result = await service.verifyListing(request.params.id, isVerified, request.user.userId, request.ip);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
+   * GET /admin/reports — список жалоб на объявления
+   */
+  server.get('/reports', { preHandler: listingActionHandler }, async (request: FastifyRequest) => {
+    const { status, page = 1, limit = 20 } = request.query as { status?: 'OPEN' | 'RESOLVED' | 'DISMISSED'; page?: number; limit?: number };
+    const service = getService(request);
+    return service.getReports({ status, page: Number(page), limit: Number(limit) });
+  });
+
+  /**
+   * PATCH /admin/reports/:id/status — обновить статус жалобы
+   */
+  server.patch<{ Params: { id: string }; Body: { status: 'OPEN' | 'RESOLVED' | 'DISMISSED' } }>('/reports/:id/status', { preHandler: listingActionHandler }, async (request, reply) => {
+    const { status } = request.body;
+    const service = getService(request);
+    try {
+      const result = await service.updateReportStatus(request.params.id, status, request.user.userId, request.ip);
+      return result;
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  /**
    * GET /admin/users — список пользователей с фильтрами
    */
   server.get('/users', { preHandler: userActionHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
