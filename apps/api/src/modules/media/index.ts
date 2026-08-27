@@ -101,4 +101,18 @@ export const mediaModule: FastifyPluginAsync = async (server) => {
       return reply.status(error.statusCode ?? 500).send({ message: error.message });
     }
   });
+  /**
+   * GET /media — список всех медиафайлов (для библиотеки и админки)
+   */
+  server.get('/', {
+    preHandler: [authMiddleware],
+  }, async (request: FastifyRequest, _reply: FastifyReply) => {
+    const { page = 1, limit = 24, mimeType } = request.query as {
+      page?: number;
+      limit?: number;
+      mimeType?: string;
+    };
+    const service = getService(request);
+    return service.listAll(Number(page), Number(limit), mimeType);
+  });
 };

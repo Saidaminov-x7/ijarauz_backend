@@ -159,4 +159,30 @@ export class MediaService {
       data: { listingId },
     });
   }
+
+  /**
+   * Получить список всех медиафайлов (для админ-панели и медиа-библиотеки)
+   */
+  async listAll(page = 1, limit = 24, mimeType?: string) {
+    const skip = (page - 1) * limit;
+    const where = mimeType ? { mimeType: { startsWith: mimeType } } : {};
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.media.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.media.count({ where }),
+    ]);
+    return {
+      items,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
 }
