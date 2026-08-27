@@ -30,6 +30,7 @@ import { pageSectionsModule } from './modules/page-sections';
 import { pagesPublicModule } from './modules/pages-public';
 import { siteSettingsPublicModule } from './modules/site-settings';
 import { savedSearchesModule } from './modules/saved-searches';
+import { viewingRequestsModule } from './modules/viewing-requests';
 
 // ─── Инициализация клиентов ───────────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ server.register(aiChatModule, { prefix: '/ai-chat' });
 server.register(analyticsModule, { prefix: '/analytics' });
 server.register(pageSectionsModule, { prefix: '/page-sections' });
 server.register(savedSearchesModule, { prefix: '/saved-searches' });
+server.register(viewingRequestsModule);
 
 // ─── Административный модуль (требует роль ADMIN/AdminRole) ───────────────────
 server.register(adminModule, { prefix: '/admin' });

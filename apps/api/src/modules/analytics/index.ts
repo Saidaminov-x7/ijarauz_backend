@@ -295,4 +295,30 @@ export const analyticsModule: FastifyPluginAsync = async (server) => {
     reply.header('Content-Disposition', `attachment; filename="analytics_${type}_${startDate.toISOString().slice(0, 10)}_${endDate.toISOString().slice(0, 10)}.csv"`);
     return reply.send('\uFEFF' + csv);
   });
+
+  /**
+   * GET /analytics/funnel — Воронка конверсии (Визиты -> Избранное -> Заявки на просмотр)
+   */
+  server.get('/funnel', {
+    preHandler: [adminMiddleware],
+  }, async (request) => {
+    const { from, to, days } = dateRangeQuerySchema.parse(request.query);
+    const dateTo = to ? new Date(to) : new Date();
+    const dateFrom = from ? new Date(from) : new Date(Date.now() - (days || 30) * 24 * 60 * 60 * 1000);
+
+    const [views, favorites, viewingRequests] = await Promise.all([
+      request.server.prisma.visitLog.count({ where: { createdAt: { gte: dateFrom, lte: dateTo } } }),
+      request.server.prisma.favorite.count({ where: { createdAt: { gte: dateFrom, lte: dateTo } } }),
+      request.server.prisma.viewingRequest.count({ where: { createdAt: { gte: dateFrom, lte: dateTo } } }),
+    ]);
+
+    return {
+      views,
+      favorites,
+      viewingRequests,
+      favoriteRate: views > 0 ? favorites / views : 0,
+      viewingRate: favorites > 0 ? viewingRequests / favorites : 0,
+      conversionRate: views > 0 ? viewingRequests / views : 0,
+    };
+  });
 };

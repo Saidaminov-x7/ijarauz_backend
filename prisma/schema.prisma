@@ -92,6 +92,13 @@ enum MessageReadStatus {
   READ
 }
 
+enum ViewingStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+  COMPLETED
+}
+
 // ========== MODELS ==========
 
 model User {
@@ -116,6 +123,7 @@ model User {
   favorites        Favorite[]
   savedSearches    SavedSearch[]
   reportsSubmitted ListingReport[] @relation("ReportedByUser")
+  viewingRequests  ViewingRequest[]
   sentMessages     ChatMessage[] @relation("Sender")
   receivedMessages ChatMessage[] @relation("Recipient")
   aiSessions       AISession[]
@@ -175,6 +183,7 @@ model Listing {
   messages         ChatMessage[]
   reports          ListingReport[]
   priceHistory     PriceHistory[]
+  viewingRequests  ViewingRequest[]
 
   @@index([ownerId])
   @@index([city])
@@ -427,4 +436,20 @@ model AdminNotification {
   @@index([isRead])
   @@index([createdAt])
   @@index([targetAdminId])
+}
+
+model ViewingRequest {
+  id            String        @id @default(uuid())
+  listingId     String
+  listing       Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  requesterId   String
+  requester     User          @relation(fields: [requesterId], references: [id], onDelete: Cascade)
+  status        ViewingStatus @default(PENDING)
+  preferredDate DateTime?
+  message       String?
+  createdAt     DateTime      @default(now())
+
+  @@index([listingId])
+  @@index([requesterId])
+  @@index([status])
 }

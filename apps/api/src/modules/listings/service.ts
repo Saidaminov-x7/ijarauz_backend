@@ -4,6 +4,7 @@ import { PrismaClient, Listing, ListingStatus, ModerationStatus, Prisma } from '
 import { CreateListingDto, UpdateListingDto, ListingsFilterDto } from './schemas';
 import { config } from '../../config';
 import { FastifyBaseLogger } from 'fastify';
+import { detectSuspiciousContent } from '../../lib/pre-moderation';
 
 interface AIModerationResult {
   approved: boolean;
@@ -152,6 +153,12 @@ export class ListingsService {
         }
         // Остаёмся в PENDING для ручной модерации
       }
+    }
+
+    const suspiciousCheck = detectSuspiciousContent(dto.description);
+    if (suspiciousCheck.suspicious) {
+      const flagNote = `Автоматически помечено: контакты в описании (${suspiciousCheck.reasons.join(', ')})`;
+      moderationNote = moderationNote ? `${moderationNote}; ${flagNote}` : flagNote;
     }
 
     const listing = await this.prisma.listing.create({
