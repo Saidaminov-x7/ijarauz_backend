@@ -256,8 +256,11 @@ server.setNotFoundHandler((request, reply) => {
 });
 
 import { startTelegramBot, stopTelegramBot } from './lib/telegram';
+import { expirePromotions } from './lib/jobs/expire-promotions';
 
 // ─── Запуск и Graceful Shutdown ───────────────────────────────────────────────
+
+let promotionsInterval: NodeJS.Timeout | null = null;
 
 const start = async () => {
   try {
@@ -266,6 +269,18 @@ const start = async () => {
 
     // Запускаем Telegram-бота для 2FA
     startTelegramBot(redis, server.log);
+
+    // Первичная очистка истёкших промо-акций сразу при старте
+    expirePromotions(prisma, server.log).catch((err) => {
+      server.log.error({ err }, '[Promotions] Error during startup expirePromotions check');
+    });
+
+    // Периодическая очистка истёкших Boost/VIP промо-акций (каждый час)
+    promotionsInterval = setInterval(() => {
+      expirePromotions(prisma, server.log).catch((err) => {
+        server.log.error({ err }, '[Promotions] Error in expirePromotions interval');
+      });
+    }, 60 * 60 * 1000);
   } catch (err) {
     server.log.error(err, 'Failed to start server');
     process.exit(1);
@@ -275,6 +290,9 @@ const start = async () => {
 const shutdown = async (signal: string) => {
   server.log.info(`Received ${signal}, graceful shutdown...`);
   try {
+    if (promotionsInterval) {
+      clearInterval(promotionsInterval);
+    }
     stopTelegramBot();
     await server.close();
     await prisma.$disconnect();
