@@ -4,12 +4,13 @@ import { IStorageAdapter, StorageUploadResult } from './storage.interface';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import sharp from 'sharp';
 import { config } from '../../../config';
+import { FastifyBaseLogger } from 'fastify';
 
 /**
  * Облачный адаптер Cloudinary (S3-совместимое медиахранилище для Production)
  */
 export class CloudinaryStorageAdapter implements IStorageAdapter {
-  constructor() {
+  constructor(private readonly logger?: FastifyBaseLogger) {
     if (!config.CLOUDINARY_CLOUD_NAME || !config.CLOUDINARY_API_KEY || !config.CLOUDINARY_API_SECRET) {
       throw new Error(
         'Cloudinary adapter requires CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET environment variables',
@@ -77,8 +78,9 @@ export class CloudinaryStorageAdapter implements IStorageAdapter {
     try {
       await cloudinary.uploader.destroy(key);
     } catch (err) {
-      // TODO: Pass FastifyBaseLogger to CloudinaryStorageAdapter constructor when DI container is introduced
-      console.warn(`[CloudinaryStorageAdapter] Failed to delete file: ${key}`, err);
+      if (this.logger) {
+        this.logger.warn({ err, key }, '[CloudinaryStorageAdapter] Failed to delete file');
+      }
     }
   }
 }

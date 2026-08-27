@@ -12,7 +12,7 @@ import {
 } from './schemas';
 
 export const listingsModule: FastifyPluginAsync = async (server) => {
-  const getService = (req: FastifyRequest) => new ListingsService(req.server.prisma);
+  const getService = (req: FastifyRequest) => new ListingsService(req.server.prisma, req.log);
 
   // ─── Публичные маршруты ───────────────────────────────────────────────
 

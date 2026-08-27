@@ -15,7 +15,12 @@ let pollingTimeout: NodeJS.Timeout | null = null;
 /**
  * Отправка сообщения в Telegram
  */
-export async function sendTelegramMessage(chatId: string | number, text: string, parseMode: 'HTML' | 'Markdown' = 'HTML'): Promise<boolean> {
+export async function sendTelegramMessage(
+  chatId: string | number,
+  text: string,
+  parseMode: 'HTML' | 'Markdown' = 'HTML',
+  logger?: FastifyBaseLogger,
+): Promise<boolean> {
   try {
     const res = await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
       method: 'POST',
@@ -28,11 +33,15 @@ export async function sendTelegramMessage(chatId: string | number, text: string,
     });
     const json = (await res.json()) as { ok: boolean; description?: string };
     if (!json.ok) {
-      console.error('[Telegram] Failed to send message:', json.description);
+      if (logger) {
+        logger.error({ description: json.description }, '[Telegram] Failed to send message');
+      }
     }
     return json.ok;
   } catch (err) {
-    console.error('[Telegram] Error sending message:', err);
+    if (logger) {
+      logger.error({ err }, '[Telegram] Error sending message');
+    }
     return false;
   }
 }

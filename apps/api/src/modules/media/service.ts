@@ -6,6 +6,8 @@ import { config } from '../../config';
 import { ALLOWED_MIME_TYPES } from './schemas';
 import { createStorageAdapter, IStorageAdapter } from './storage';
 
+import { FastifyBaseLogger } from 'fastify';
+
 export interface UploadedFile {
   filename: string;
   mimetype: string;
@@ -18,8 +20,9 @@ export class MediaService {
   constructor(
     private readonly prisma: PrismaClient,
     storageAdapter?: IStorageAdapter,
+    logger?: FastifyBaseLogger,
   ) {
-    this.storage = storageAdapter ?? createStorageAdapter();
+    this.storage = storageAdapter ?? createStorageAdapter(logger);
   }
 
   /**

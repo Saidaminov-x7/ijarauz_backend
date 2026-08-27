@@ -3,6 +3,7 @@
 import { PrismaClient, Listing, ListingStatus, ModerationStatus, Prisma } from '@prisma/client';
 import { CreateListingDto, UpdateListingDto, ListingsFilterDto } from './schemas';
 import { config } from '../../config';
+import { FastifyBaseLogger } from 'fastify';
 
 interface AIModerationResult {
   approved: boolean;
@@ -15,7 +16,7 @@ class AIModerationService {
   private readonly ollamaBaseUrl: string;
   private readonly ollamaModel: string;
 
-  constructor() {
+  constructor(private readonly logger?: FastifyBaseLogger) {
     this.ollamaBaseUrl = config.OLLAMA_BASE_URL;
     this.ollamaModel = config.OLLAMA_MODEL || 'llama3';
   }
@@ -68,7 +69,9 @@ class AIModerationService {
         fraudScore: result.fraudScore,
       };
     } catch (err) {
-      console.error('AI moderation error:', err);
+      if (this.logger) {
+        this.logger.error({ err }, 'AI moderation error');
+      }
       // При ошибке AI — отправляем на ручную модерацию
       return { approved: false, reason: 'AI модерация недоступна' };
     }
@@ -110,7 +113,10 @@ const sharedAIModerationQueue = new AIModerationQueue(new AIModerationService())
 export class ListingsService {
   private readonly aiModerationQueue: AIModerationQueue;
 
-  constructor(private readonly prisma: PrismaClient) {
+  constructor(
+    private readonly prisma: PrismaClient,
+    private readonly logger?: FastifyBaseLogger,
+  ) {
     this.aiModerationQueue = sharedAIModerationQueue;
   }
 
@@ -141,7 +147,9 @@ export class ListingsService {
           moderationNote = aiResult.reason || 'Отклонено AI-модерацией';
         }
       } catch (err) {
-        console.error('AI moderation failed, falling back to manual:', err);
+        if (this.logger) {
+          this.logger.error({ err }, 'AI moderation failed, falling back to manual');
+        }
         // Остаёмся в PENDING для ручной модерации
       }
     }

@@ -21,16 +21,36 @@ export const verify2faHandler = async (
     return reply.status(400).send({ message: 'Срок действия кода истек или токен недействителен. Повторите попытку входа.' });
   }
 
-  let session: { userId: string; code: string; email: string };
+  let session: { userId: string; code: string; email: string; attempts?: number };
   try {
     session = JSON.parse(dataStr);
   } catch {
     return reply.status(400).send({ message: 'Неверные данные сессии 2FA' });
   }
 
-  // Проверяем совпадение 6-значного кода
+  // Проверяем совпадение 6-значного кода с лимитом попыток (максимум 5 попыток)
   if (session.code !== dto.code.trim()) {
-    return reply.status(400).send({ message: 'Неверный код подтверждения' });
+    const attempts = (session.attempts || 0) + 1;
+    const maxAttempts = 5;
+
+    if (attempts >= maxAttempts) {
+      // Превышен лимит попыток — немедленно удаляем сессию
+      await redis.del(`2fa:${dto.tempToken}`);
+      return reply.status(400).send({
+        message: 'Слишком много неверных попыток. Сессия аннулирована, пожалуйста, войдите заново.',
+      });
+    }
+
+    // Сохраняем обновлённый счётчик с сохранением оставшегося TTL (или до 5 минут)
+    session.attempts = attempts;
+    const remainingTtl = await redis.ttl(`2fa:${dto.tempToken}`);
+    const ttl = remainingTtl > 0 ? remainingTtl : 300;
+    await redis.set(`2fa:${dto.tempToken}`, JSON.stringify(session), 'EX', ttl);
+
+    const remainingAttempts = maxAttempts - attempts;
+    return reply.status(400).send({
+      message: `Неверный код подтверждения. Осталось попыток: ${remainingAttempts}`,
+    });
   }
 
   // Удаляем использованный 2FA токен из Redis

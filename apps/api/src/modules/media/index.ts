@@ -6,7 +6,7 @@ import { MediaService } from './service';
 import { uploadQuerySchema } from './schemas';
 
 export const mediaModule: FastifyPluginAsync = async (server) => {
-  const getService = (req: FastifyRequest) => new MediaService(req.server.prisma);
+  const getService = (req: FastifyRequest) => new MediaService(req.server.prisma, undefined, req.log);
 
   /**
    * POST /media/upload — загрузить изображение

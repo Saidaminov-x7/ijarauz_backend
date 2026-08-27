@@ -5,12 +5,16 @@ import { writeFile, unlink, mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
 import { randomUUID } from 'crypto';
 import { config } from '../../../config';
+import { FastifyBaseLogger } from 'fastify';
 
 /**
  * Локальный файловый адаптер (диск /tmp/uploads или подключенный Railway Volume)
  */
 export class LocalStorageAdapter implements IStorageAdapter {
-  constructor(private readonly storagePath: string = config.STORAGE_PATH) {}
+  constructor(
+    private readonly storagePath: string = config.STORAGE_PATH,
+    private readonly logger?: FastifyBaseLogger,
+  ) {}
 
   async upload(file: {
     filename: string;
@@ -66,8 +70,9 @@ export class LocalStorageAdapter implements IStorageAdapter {
       
       // Проверка на path traversal: итоговый путь должен начинаться с storagePath
       if (!resolvedPath.startsWith(resolvedStoragePath)) {
-        // TODO: Pass FastifyBaseLogger to LocalStorageAdapter constructor when DI container is introduced
-        console.warn(`[LocalStorageAdapter] Path traversal attempt detected: ${key}`);
+        if (this.logger) {
+          this.logger.warn({ key }, '[LocalStorageAdapter] Path traversal attempt detected');
+        }
         return;
       }
       
@@ -76,8 +81,9 @@ export class LocalStorageAdapter implements IStorageAdapter {
       }
     } catch (err) {
       // Ошибка удаления файла не должна блокировать удаление из БД
-      // TODO: Pass FastifyBaseLogger to LocalStorageAdapter constructor when DI container is introduced
-      console.warn(`[LocalStorageAdapter] Failed to delete file: ${key}`, err);
+      if (this.logger) {
+        this.logger.warn({ err, key }, '[LocalStorageAdapter] Failed to delete file');
+      }
     }
   }
 }

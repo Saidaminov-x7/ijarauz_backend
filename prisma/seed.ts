@@ -14,8 +14,16 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting safe idempotent database seed...');
 
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD?.trim();
+  if (!adminPassword) {
+    throw new Error(
+      '❌ SEED_ADMIN_PASSWORD is required in environment variables to run the database seed.\n' +
+      'Set SEED_ADMIN_PASSWORD before running this script (e.g. SEED_ADMIN_PASSWORD=your_secure_password pnpm prisma:seed).'
+    );
+  }
+
   // Хэширование пароля супер-администратора (argon2 hash)
-  const superAdminPasswordHash = await argon2.hash('admin1');
+  const superAdminPasswordHash = await argon2.hash(adminPassword);
 
   // ─── 1. Супер-администратор (upsert: безопасен для существующих данных) ───────
   console.log('Ensuring Super Admin account exists...');
@@ -176,7 +184,7 @@ async function main() {
   console.log('');
   console.log('--- Аккаунт администратора ---');
   console.log(`Email:    vosilhojasaidaminov@gmail.com`);
-  console.log(`Пароль:   admin1 (хэширован в базе данных через argon2)`);
+  console.log(`Пароль:   [установлен из переменной SEED_ADMIN_PASSWORD]`);
   console.log(`Роль:     SUPER_ADMIN`);
 }
 

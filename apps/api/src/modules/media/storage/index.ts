@@ -9,12 +9,14 @@ export * from './storage.interface';
 export * from './local.adapter';
 export * from './cloudinary.adapter';
 
+import { FastifyBaseLogger } from 'fastify';
+
 /**
  * Фабрика хранилища: возвращает адаптер согласно переменной STORAGE_DRIVER
  */
-export function createStorageAdapter(): IStorageAdapter {
+export function createStorageAdapter(logger?: FastifyBaseLogger): IStorageAdapter {
   if (config.STORAGE_DRIVER === 'cloudinary') {
-    return new CloudinaryStorageAdapter();
+    return new CloudinaryStorageAdapter(logger);
   }
-  return new LocalStorageAdapter(config.STORAGE_PATH);
+  return new LocalStorageAdapter(config.STORAGE_PATH, logger);
 }
