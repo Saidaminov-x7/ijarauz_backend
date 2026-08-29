@@ -89,6 +89,26 @@ export const updateSiteSettingsSchema = z.object({
   logoUrl: z.string().url().optional().nullable(),
   vipBoostEnabled: z.boolean().optional(),
   verificationEnabled: z.boolean().optional(),
+
+  // Feature Flags & Integrations
+  deviceIpBanEnabled: z.boolean().optional(),
+  adaptiveRateLimitEnabled: z.boolean().optional(),
+  twoFactorAuthEnabled: z.boolean().optional(),
+  geoIpValidationEnabled: z.boolean().optional(),
+  tokenRotationEnabled: z.boolean().optional(),
+  fieldEncryptionEnabled: z.boolean().optional(),
+  sessionQuarantineEnabled: z.boolean().optional(),
+  thunderingHerdEnabled: z.boolean().optional(),
+  fullTextSearchEnabled: z.boolean().optional(),
+  paymeClickEnabled: z.boolean().optional(),
+  autoFiscalizationEnabled: z.boolean().optional(),
+  smsGatewayEnabled: z.boolean().optional(),
+  watermarkDetectorEnabled: z.boolean().optional(),
+  webPushEnabled: z.boolean().optional(),
+  oneIdAuthEnabled: z.boolean().optional(),
+  yandexRealtyXmlEnabled: z.boolean().optional(),
+  openTelemetryEnabled: z.boolean().optional(),
+  yandexMetrikaId: z.string().max(50).optional(),
 });
 
 export type UpdateSiteSettingsDto = z.infer<typeof updateSiteSettingsSchema>;

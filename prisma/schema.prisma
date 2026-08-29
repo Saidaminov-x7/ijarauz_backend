@@ -352,6 +352,27 @@ model SiteSettings {
   vipBoostEnabled       Boolean  @default(true) // Feature-flag: VIP буст
   verificationEnabled   Boolean  @default(true) // Feature-flag: верификация
   navLinks              Json?    // Навигационные ссылки для шапки/подвала
+
+  // === РАСШИРЕННЫЕ FEATURE FLAGS & ИНТЕГРАЦИИ (1, 2, 3, 4, 6, 7, 8, 9, 10, 16, 18, 31, 26, 35, 37, 41, 47) ===
+  deviceIpBanEnabled    Boolean  @default(false) // 1. Авто-бан по Device & IP
+  adaptiveRateLimitEnabled Boolean @default(true) // 2. Адаптивный Rate Limiting / DDoS защита
+  twoFactorAuthEnabled  Boolean  @default(false) // 3. Двухфакторная аутентификация (2FA / TOTP)
+  geoIpValidationEnabled Boolean @default(false) // 4. Валидация геолокации по IP
+  tokenRotationEnabled  Boolean  @default(true)  // 6. Ротация Refresh токенов & Revocation
+  fieldEncryptionEnabled Boolean @default(true)  // 7. Field-Level Encryption
+  sessionQuarantineEnabled Boolean @default(false) // 8. Авто-карантин подозрительных сессий
+  thunderingHerdEnabled Boolean  @default(true)  // 9. Thundering Herd защита кэша
+  fullTextSearchEnabled Boolean  @default(true)  // 10. Полнотекстовый поиск с морфологией
+  paymeClickEnabled     Boolean  @default(false) // 16. Платежные шлюзы Payme / Click
+  autoFiscalizationEnabled Boolean @default(false) // 18. Авто-фискализация чеков (Soliq OFD)
+  smsGatewayEnabled     Boolean  @default(false) // 31. SMS-шлюз (Eskiz / PlayMobile)
+  watermarkDetectorEnabled Boolean @default(false) // 26. Детектор водяных знаков на фото
+  webPushEnabled        Boolean  @default(false) // 35. Web Push уведомления
+  oneIdAuthEnabled      Boolean  @default(false) // 37. Верификация через OneID
+  yandexRealtyXmlEnabled Boolean @default(true)  // 41. Генератор Yandex Realty XML фида
+  openTelemetryEnabled  Boolean  @default(true)  // 47. Трассировка OpenTelemetry
+  yandexMetrikaId       String   @default("112059980") // ID счетчика Яндекс.Метрики
+
   updatedAt             DateTime @updatedAt
   updatedById           String?
   updatedBy             User?    @relation("SiteSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)

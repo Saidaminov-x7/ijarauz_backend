@@ -35,6 +35,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         listingsPerPage: true,
         logoUrl: true,
         navLinks: true,
+        yandexMetrikaId: true,
       },
     });
 
@@ -52,6 +53,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         listingsPerPage: 10,
         logoUrl: null,
         navLinks: null,
+        yandexMetrikaId: '112059980',
       };
     }
 
