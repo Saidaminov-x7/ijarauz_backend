@@ -582,7 +582,7 @@ export class ListingsService {
   async createReport(
     listingId: string,
     reporterId: string | null,
-    reason: 'SCAM' | 'ALREADY_RENTED' | 'WRONG_PRICE' | 'WRONG_PHOTOS' | 'DUPLICATE' | 'OTHER',
+    reason: 'SCAM' | 'ALREADY_RENTED' | 'WRONG_PRICE' | 'WRONG_PHOTOS' | 'DUPLICATE' | 'REALTOR' | 'OTHER',
     comment?: string,
   ) {
     const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });

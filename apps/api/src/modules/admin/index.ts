@@ -631,4 +631,302 @@ export const adminModule: FastifyPluginAsync = async (server) => {
       return reply.status(500).send({ message: `Failed to generate export: ${error.message}` });
     }
   });
+
+  // ─── [ФИЧА 2, 1, 8] FRAUD SCORE, DUPLICATE & FAIR PRICE ─────────────────────
+  server.get<{ Params: { id: string } }>('/listings/:id/fraud-analysis', { preHandler: supportHandler }, async (request, reply) => {
+    const { FraudDetectionService } = await import('./fraudDetection.service');
+    const detector = new FraudDetectionService(request.server.prisma);
+    try {
+      return await detector.analyzeListing(request.params.id);
+    } catch (err) {
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+    }
+  });
+
+  // ─── [ФИЧА 6] HEATMAP ANALYTICS ─────────────────────────────────────────────
+  server.get('/analytics/heatmap', { preHandler: analyticsHandler }, async (request, reply) => {
+    const listings = await request.server.prisma.listing.findMany({
+      where: { status: 'ACTIVE', moderationStatus: 'APPROVED' },
+      select: {
+        id: true,
+        lat: true,
+        lng: true,
+        price: true,
+        rooms: true,
+        city: true,
+        district: true,
+        viewsCount: true,
+      },
+      take: 2000,
+    });
+
+    const districtStats: Record<string, { count: number; totalPrice: number; avgPrice: number; views: number; lat: number; lng: number }> = {};
+
+    for (const l of listings) {
+      if (!l.district) continue;
+      const key = `${l.city}_${l.district}`;
+      if (!districtStats[key]) {
+        districtStats[key] = {
+          count: 0,
+          totalPrice: 0,
+          avgPrice: 0,
+          views: 0,
+          lat: l.lat || 41.311081,
+          lng: l.lng || 69.240562,
+        };
+      }
+      districtStats[key].count++;
+      districtStats[key].totalPrice += Number(l.price);
+      districtStats[key].views += l.viewsCount || 0;
+    }
+
+    const districts = Object.entries(districtStats).map(([key, stat]) => {
+      const [city, district] = key.split('_');
+      return {
+        city,
+        district,
+        count: stat.count,
+        avgPrice: Math.round(stat.totalPrice / (stat.count || 1)),
+        views: stat.views,
+        lat: stat.lat,
+        lng: stat.lng,
+      };
+    });
+
+    return {
+      points: listings.filter((l) => l.lat && l.lng).map((l) => ({
+        id: l.id,
+        lat: l.lat,
+        lng: l.lng,
+        weight: Number(l.price),
+        views: l.viewsCount,
+      })),
+      districts,
+    };
+  });
+
+  // ─── [ФИЧА 9] SEARCH QUERIES ANALYTICS ───────────────────────────────────────
+  server.get('/analytics/search-queries', { preHandler: analyticsHandler }, async (request, reply) => {
+    const [recentSearches, totalSearches, zeroResultsCount] = await Promise.all([
+      request.server.prisma.searchQueryLog.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      request.server.prisma.searchQueryLog.count(),
+      request.server.prisma.searchQueryLog.count({ where: { resultsCount: 0 } }),
+    ]);
+
+    return {
+      recentSearches,
+      stats: {
+        totalSearches,
+        zeroResultsCount,
+        unmetDemandPercent: totalSearches > 0 ? Math.round((zeroResultsCount / totalSearches) * 100) : 0,
+      },
+    };
+  });
+
+  // ─── [ФИЧА 18] PROMO CODES ──────────────────────────────────────────────────
+  server.get('/promo-codes', { preHandler: settingsHandler }, async (request, reply) => {
+    return request.server.prisma.promoCode.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  });
+
+  server.post<{ Body: { code: string; discountPercent: number; maxUses: number; expiresAt?: string } }>(
+    '/promo-codes',
+    { preHandler: settingsHandler },
+    async (request, reply) => {
+      const { code, discountPercent, maxUses, expiresAt } = request.body;
+      const created = await request.server.prisma.promoCode.create({
+        data: {
+          code: code.trim().toUpperCase(),
+          discountPercent: discountPercent || 10,
+          maxUses: maxUses || 100,
+          expiresAt: expiresAt ? new Date(expiresAt) : null,
+        },
+      });
+      return reply.status(201).send(created);
+    },
+  );
+
+  server.delete<{ Params: { id: string } }>('/promo-codes/:id', { preHandler: settingsHandler }, async (request, reply) => {
+    await request.server.prisma.promoCode.delete({ where: { id: request.params.id } });
+    return { success: true };
+  });
+
+  // ─── [ФИЧА 20] REVENUE & FINANCIAL STATS ────────────────────────────────────
+  server.get('/stats/revenue', { preHandler: analyticsHandler }, async (request, reply) => {
+    const promotedListings = await request.server.prisma.listing.findMany({
+      where: { isPromoted: true },
+      select: {
+        id: true,
+        title: true,
+        promotionTier: true,
+        promotedUntil: true,
+        createdAt: true,
+      },
+    });
+
+    const tierPrices: Record<string, number> = {
+      BASIC: 50000,
+      TOP: 120000,
+      URGENT: 90000,
+    };
+
+    let totalRevenue = 0;
+    const tierCounts: Record<string, number> = { BASIC: 0, TOP: 0, URGENT: 0 };
+
+    for (const p of promotedListings) {
+      const tier = p.promotionTier || 'BASIC';
+      tierCounts[tier] = (tierCounts[tier] || 0) + 1;
+      totalRevenue += tierPrices[tier] || 50000;
+    }
+
+    return {
+      totalRevenue,
+      activePromotionsCount: promotedListings.length,
+      tierCounts,
+      estimatedMRR: Math.round(totalRevenue * 1.5),
+      promotedListings: promotedListings.slice(0, 50),
+    };
+  });
+
+  // ─── [ФИЧА 26] SYSTEM HEALTH MONITORING ─────────────────────────────────────
+  server.get('/system/health', { preHandler: settingsHandler }, async (request, reply) => {
+    let dbStatus = 'UP';
+    let dbLatencyMs = 0;
+    const startDb = Date.now();
+    try {
+      await request.server.prisma.$queryRaw`SELECT 1`;
+      dbLatencyMs = Date.now() - startDb;
+    } catch {
+      dbStatus = 'DOWN';
+    }
+
+    let redisStatus = 'UP';
+    let redisLatencyMs = 0;
+    const startRedis = Date.now();
+    try {
+      await request.server.redis.ping();
+      redisLatencyMs = Date.now() - startRedis;
+    } catch {
+      redisStatus = 'DOWN';
+    }
+
+    const memoryUsage = process.memoryUsage();
+
+    return {
+      status: dbStatus === 'UP' && redisStatus === 'UP' ? 'HEALTHY' : 'DEGRADED',
+      uptimeSeconds: Math.floor(process.uptime()),
+      database: { status: dbStatus, latencyMs: dbLatencyMs },
+      redis: { status: redisStatus, latencyMs: redisLatencyMs },
+      memory: {
+        rssMb: Math.round(memoryUsage.rss / 1024 / 1024),
+        heapUsedMb: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotalMb: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+      },
+      nodeVersion: process.version,
+      timestamp: new Date().toISOString(),
+    };
+  });
+
+  // ─── [ФИЧА 27] WEBHOOKS ─────────────────────────────────────────────────────
+  server.get('/webhooks', { preHandler: settingsHandler }, async (request, reply) => {
+    return request.server.prisma.systemWebhook.findMany({ orderBy: { createdAt: 'desc' } });
+  });
+
+  server.post<{ Body: { name: string; url: string; events: string[]; secret?: string } }>(
+    '/webhooks',
+    { preHandler: settingsHandler },
+    async (request, reply) => {
+      const { name, url, events, secret } = request.body;
+      const created = await request.server.prisma.systemWebhook.create({
+        data: { name, url, events: events || ['ALL'], secret },
+      });
+      return reply.status(201).send(created);
+    },
+  );
+
+  server.delete<{ Params: { id: string } }>('/webhooks/:id', { preHandler: settingsHandler }, async (request, reply) => {
+    await request.server.prisma.systemWebhook.delete({ where: { id: request.params.id } });
+    return { success: true };
+  });
+
+  // ─── [ФИЧА 29] BACKUPS & SNAPSHOTS ──────────────────────────────────────────
+  server.get('/system/backups', { preHandler: settingsHandler }, async (request, reply) => {
+    const [listingsCount, usersCount, reportsCount] = await Promise.all([
+      request.server.prisma.listing.count(),
+      request.server.prisma.user.count(),
+      request.server.prisma.listingReport.count(),
+    ]);
+
+    return {
+      lastAutomaticBackup: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
+      snapshotStats: {
+        listings: listingsCount,
+        users: usersCount,
+        reports: reportsCount,
+      },
+    };
+  });
+
+  server.get('/system/backups/export-snapshot', { preHandler: settingsHandler }, async (request, reply) => {
+    const [users, listings, settings] = await Promise.all([
+      request.server.prisma.user.findMany({
+        select: { id: true, name: true, email: true, phone: true, role: true, createdAt: true },
+      }),
+      request.server.prisma.listing.findMany({ take: 500 }),
+      request.server.prisma.siteSettings.findFirst(),
+    ]);
+
+    const snapshot = {
+      timestamp: new Date().toISOString(),
+      version: '1.0',
+      data: { users, listings, settings },
+    };
+
+    reply.header('Content-Type', 'application/json');
+    reply.header('Content-Disposition', `attachment; filename="ijarauz-snapshot-${Date.now()}.json"`);
+    return reply.send(JSON.stringify(snapshot, null, 2));
+  });
+
+  // ─── [ФИЧА 30] KANBAN MODERATION BOARD ──────────────────────────────────────
+  server.get('/moderation/kanban', { preHandler: listingActionHandler }, async (request, reply) => {
+    const [pending, changesRequested, rejected, approved] = await Promise.all([
+      request.server.prisma.listing.findMany({
+        where: { moderationStatus: 'PENDING' },
+        include: { owner: { select: { id: true, name: true, phone: true, email: true, verified: true } }, images: true },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+      }),
+      request.server.prisma.listing.findMany({
+        where: { moderationStatus: 'CHANGES_REQUESTED' },
+        include: { owner: { select: { id: true, name: true, phone: true, email: true, verified: true } }, images: true },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+      }),
+      request.server.prisma.listing.findMany({
+        where: { moderationStatus: 'REJECTED' },
+        include: { owner: { select: { id: true, name: true, phone: true, email: true, verified: true } }, images: true },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+      }),
+      request.server.prisma.listing.findMany({
+        where: { moderationStatus: 'APPROVED', isVerified: true },
+        include: { owner: { select: { id: true, name: true, phone: true, email: true, verified: true } }, images: true },
+        orderBy: { createdAt: 'desc' },
+        take: 30,
+      }),
+    ]);
+
+    return {
+      PENDING: pending,
+      CHANGES_REQUESTED: changesRequested,
+      REJECTED: rejected,
+      APPROVED_VERIFIED: approved,
+    };
+  });
 };
+

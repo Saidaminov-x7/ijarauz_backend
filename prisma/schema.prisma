@@ -61,6 +61,7 @@ enum ReportReason {
   WRONG_PRICE
   WRONG_PHOTOS
   DUPLICATE
+  REALTOR
   OTHER
 }
 
@@ -489,4 +490,51 @@ model ClientErrorReport {
   @@index([resolved])
   @@index([createdAt])
   @@index([severity])
+}
+
+model PromoCode {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  discountPercent Int       @default(10)
+  maxUses         Int       @default(100)
+  usedCount       Int       @default(0)
+  isActive        Boolean   @default(true)
+  expiresAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([code])
+  @@index([isActive])
+}
+
+model SearchQueryLog {
+  id         String   @id @default(uuid())
+  query      String?
+  city       String?
+  district   String?
+  minPrice   Decimal? @db.Decimal(12, 2)
+  maxPrice   Decimal? @db.Decimal(12, 2)
+  rooms      Int?
+  resultsCount Int    @default(0)
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([city])
+  @@index([district])
+  @@index([createdAt])
+  @@index([resultsCount])
+}
+
+model SystemWebhook {
+  id        String   @id @default(uuid())
+  name      String
+  url       String
+  events    String[] // e.g. ["FRAUD_DETECTED", "REPORT_CREATED", "SYSTEM_ERROR", "PAYMENT_RECEIVED"]
+  isActive  Boolean  @default(true)
+  secret    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
 }
