@@ -36,6 +36,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         logoUrl: true,
         navLinks: true,
         yandexMetrikaId: true,
+        yandexMetrikaEnabled: true,
       },
     });
 
@@ -54,6 +55,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         logoUrl: null,
         navLinks: null,
         yandexMetrikaId: '112059980',
+        yandexMetrikaEnabled: true,
       };
     }
 
@@ -62,6 +64,33 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
 
     reply.header('X-Cache', 'MISS');
     return settings;
+  });
+
+  /**
+   * POST /site-settings/public/check-bypass — проверить пароль обхода тех. обслуживания
+   * Возвращает { allowed: true } если пароль верный.
+   */
+  server.post<{ Body: { password: string } }>('/public/check-bypass', async (request, reply) => {
+    const { password } = request.body || {};
+    if (!password) {
+      return reply.status(400).send({ message: 'Password is required' });
+    }
+
+    const settings = await server.prisma.siteSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { maintenanceBypassPassword: true },
+    });
+
+    const bypassPassword = settings?.maintenanceBypassPassword;
+    if (!bypassPassword) {
+      return reply.status(404).send({ message: 'No bypass password configured' });
+    }
+
+    if (password === bypassPassword) {
+      return { allowed: true };
+    }
+
+    return reply.status(401).send({ allowed: false, message: 'Неверный пароль' });
   });
 
   /**

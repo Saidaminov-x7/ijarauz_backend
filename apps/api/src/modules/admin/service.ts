@@ -319,19 +319,24 @@ export class AdminService {
 
     const now = new Date();
     const and: Prisma.UserWhereInput[] = [];
-    if (role) and.push({ role });
+    if (role) {
+      const dbRole = role === 'TENANT' ? Role.USER : (role as Role);
+      and.push({ role: dbRole });
+    }
     if (isBlocked !== undefined) and.push({ isBlocked });
     if (isStaff === true) {
       and.push({ OR: [{ role: Role.ADMIN }, { adminRole: { not: null } }] });
     } else if (isStaff === false) {
       and.push({ role: { in: [Role.USER, Role.LANDLORD] }, adminRole: null });
     }
-    if (search) {
+    if (search && search.trim()) {
+      const q = search.trim();
       and.push({
         OR: [
-          { name: { contains: search, mode: 'insensitive' } },
-          { email: { contains: search, mode: 'insensitive' } },
-          { phone: { contains: search, mode: 'insensitive' } },
+          { name: { contains: q, mode: 'insensitive' } },
+          { email: { contains: q, mode: 'insensitive' } },
+          { phone: { contains: q, mode: 'insensitive' } },
+          { id: { contains: q, mode: 'insensitive' } },
         ],
       });
     }
@@ -577,7 +582,7 @@ export class AdminService {
 
     const where: Prisma.UserWhereInput = {
       AND: [
-        ...(role ? [{ role }] : []),
+        ...(role ? [{ role: role === 'TENANT' ? Role.USER : (role as Role) }] : []),
         ...(isBlocked !== undefined ? [{ isBlocked }] : []),
         ...(isStaff === true ? [{ OR: [{ role: Role.ADMIN }, { adminRole: { not: null } }] }] : []),
         ...(isStaff === false ? [{ role: { in: [Role.USER, Role.LANDLORD] }, adminRole: null }] : []),
@@ -586,6 +591,7 @@ export class AdminService {
             { name: { contains: search, mode: 'insensitive' as const } },
             { email: { contains: search, mode: 'insensitive' as const } },
             { phone: { contains: search, mode: 'insensitive' as const } },
+            { id: { contains: search, mode: 'insensitive' as const } },
           ],
         }] : []),
         ...((dateFrom || dateTo) ? [{

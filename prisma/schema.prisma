@@ -411,6 +411,9 @@ model SiteSettings {
   yandexRealtyXmlEnabled Boolean @default(true)  // 41. Генератор Yandex Realty XML фида
   openTelemetryEnabled  Boolean  @default(true)  // 47. Трассировка OpenTelemetry
   yandexMetrikaId       String   @default("112059980") // ID счетчика Яндекс.Метрики
+  yandexMetrikaEnabled  Boolean  @default(true) // Включить/выключить Яндекс.Метрику
+  maintenanceBypassPassword String? // Пароль для обхода режима техобслуживания
+  maintenancePasswordEnabled Boolean @default(false) // Требовать пароль при техобслуживании
 
   updatedAt             DateTime @updatedAt
   updatedById           String?

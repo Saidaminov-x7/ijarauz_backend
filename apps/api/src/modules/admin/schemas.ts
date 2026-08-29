@@ -34,7 +34,7 @@ export const requestChangesSchema = z.object({
 export const adminUsersFilterSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
-  role: z.nativeEnum(Role).optional(),
+  role: z.enum(['USER', 'LANDLORD', 'ADMIN', 'TENANT']).optional(),
   isBlocked: z.coerce.boolean().optional(),
   isStaff: z.coerce.boolean().optional(), // Только персонал (ADMIN + adminRole не null)
   city: z.string().optional(),
@@ -109,6 +109,8 @@ export const updateSiteSettingsSchema = z.object({
   yandexRealtyXmlEnabled: z.boolean().optional(),
   openTelemetryEnabled: z.boolean().optional(),
   yandexMetrikaId: z.string().max(50).optional(),
+  yandexMetrikaEnabled: z.boolean().optional(),
+  maintenanceBypassPassword: z.string().max(100).optional().nullable(),
 });
 
 export type UpdateSiteSettingsDto = z.infer<typeof updateSiteSettingsSchema>;
