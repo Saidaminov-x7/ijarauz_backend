@@ -55,6 +55,23 @@ enum ModerationStatus {
   CHANGES_REQUESTED // Запрошены правки у автора
 }
 
+enum PurchaseStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum BackupType {
+  MANUAL
+  SCHEDULED
+}
+
+enum BackupStatus {
+  COMPLETED
+  FAILED
+}
+
 enum ReportReason {
   SCAM
   ALREADY_RENTED
@@ -186,6 +203,7 @@ model Listing {
   reports          ListingReport[]
   priceHistory     PriceHistory[]
   viewingRequests  ViewingRequest[]
+  purchases        PromotionPurchase[]
 
   @@index([ownerId])
   @@index([city])
@@ -558,4 +576,31 @@ model SystemWebhook {
   updatedAt DateTime @updatedAt
 
   @@index([isActive])
+}
+
+model BackupSnapshot {
+  id            String       @id @default(uuid())
+  triggeredBy   String?      // adminId, null если по расписанию
+  type          BackupType
+  status        BackupStatus @default(COMPLETED)
+  recordCounts  Json         // { listings: number, users: number, reports: number }
+  createdAt     DateTime     @default(now())
+
+  @@index([createdAt])
+}
+
+model PromotionPurchase {
+  id           String         @id @default(uuid())
+  listingId    String
+  listing      Listing        @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  buyerId      String
+  tier         PromotionTier
+  amount       Decimal        @db.Decimal(12, 2)
+  currency     String         @default("UZS")
+  status       PurchaseStatus @default(PENDING)
+  paidAt       DateTime?
+  createdAt    DateTime       @default(now())
+
+  @@index([status])
+  @@index([createdAt])
 }

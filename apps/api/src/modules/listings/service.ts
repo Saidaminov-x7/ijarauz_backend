@@ -248,11 +248,29 @@ export class ListingsService {
 
     const { search } = filter;
 
+    let searchCondition: Prisma.ListingWhereInput = {};
+    if (search) {
+      const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
+      if (settings?.fullTextSearchEnabled) {
+        // Полнотекстовый комбинированный поиск по заголовку, описанию и адресу
+        searchCondition = {
+          OR: [
+            { title: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+            { address: { contains: search, mode: 'insensitive' } },
+          ],
+        };
+      } else {
+        // Базовый поиск только по названию
+        searchCondition = { title: { contains: search, mode: 'insensitive' } };
+      }
+    }
+
     const where: Prisma.ListingWhereInput = {
       // Публичный поиск — только активные и одобренные объявления
       status: status ?? ListingStatus.ACTIVE,
       moderationStatus: ModerationStatus.APPROVED, // Всегда фильтруем по одобренным
-      ...(search && { title: { contains: search, mode: 'insensitive' } }),
+      ...searchCondition,
       ...(city && { city: { contains: city, mode: 'insensitive' } }),
       ...(district && { district: { contains: district, mode: 'insensitive' } }),
       ...(type && { type }),
@@ -539,15 +557,37 @@ export class ListingsService {
     if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
     if (listing.ownerId !== ownerId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
 
+    const tierPrices: Record<string, number> = {
+      BASIC: 50000,
+      TOP: 120000,
+      URGENT: 90000,
+    };
+
     const promotedUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
-    return this.prisma.listing.update({
-      where: { id: listingId },
-      data: {
-        isPromoted: true,
-        promotedUntil,
-        promotionTier: tier,
-      },
-    });
+
+    const [updatedListing] = await this.prisma.$transaction([
+      this.prisma.listing.update({
+        where: { id: listingId },
+        data: {
+          isPromoted: true,
+          promotedUntil,
+          promotionTier: tier,
+        },
+      }),
+      this.prisma.promotionPurchase.create({
+        data: {
+          listingId,
+          buyerId: ownerId,
+          tier,
+          amount: tierPrices[tier] || 50000,
+          currency: 'UZS',
+          status: 'PAID', // В текущей версии промо выдаётся администратором/ручно как PAID до интеграции онлайн-эквайринга
+          paidAt: new Date(),
+        },
+      }),
+    ]);
+
+    return updatedListing;
   }
 
   /**

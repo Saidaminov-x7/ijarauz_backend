@@ -758,38 +758,55 @@ export const adminModule: FastifyPluginAsync = async (server) => {
 
   // ─── [ФИЧА 20] REVENUE & FINANCIAL STATS ────────────────────────────────────
   server.get('/stats/revenue', { preHandler: analyticsHandler }, async (request, reply) => {
-    const promotedListings = await request.server.prisma.listing.findMany({
-      where: { isPromoted: true },
-      select: {
-        id: true,
-        title: true,
-        promotionTier: true,
-        promotedUntil: true,
-        createdAt: true,
-      },
-    });
+    const [paidPurchases, activePromotions] = await Promise.all([
+      request.server.prisma.promotionPurchase.findMany({
+        where: { status: 'PAID' },
+        select: { amount: true, tier: true, createdAt: true },
+      }),
+      request.server.prisma.listing.findMany({
+        where: { isPromoted: true },
+        select: {
+          id: true,
+          title: true,
+          promotionTier: true,
+          promotedUntil: true,
+          createdAt: true,
+        },
+      }),
+    ]);
 
+    // РЕАЛЬНАЯ выручка — по факту оплаченных PromotionPurchase
+    const actualRevenue = paidPurchases.reduce((sum, p) => sum + Number(p.amount), 0);
+
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000);
+    const last30DaysRevenue = paidPurchases
+      .filter((p) => p.createdAt >= thirtyDaysAgo)
+      .reduce((sum, p) => sum + Number(p.amount), 0);
+
+    // ОЦЕНОЧНАЯ потенциальная стоимость текущих активных промо-объявлений
     const tierPrices: Record<string, number> = {
       BASIC: 50000,
       TOP: 120000,
       URGENT: 90000,
     };
 
-    let totalRevenue = 0;
     const tierCounts: Record<string, number> = { BASIC: 0, TOP: 0, URGENT: 0 };
+    let potentialValueOfActivePromotions = 0;
 
-    for (const p of promotedListings) {
+    for (const p of activePromotions) {
       const tier = p.promotionTier || 'BASIC';
       tierCounts[tier] = (tierCounts[tier] || 0) + 1;
-      totalRevenue += tierPrices[tier] || 50000;
+      potentialValueOfActivePromotions += tierPrices[tier] || 50000;
     }
 
     return {
-      totalRevenue,
-      activePromotionsCount: promotedListings.length,
+      actualRevenue,
+      last30DaysRevenue,
+      hasPaymentIntegration: paidPurchases.length > 0,
+      activePromotionsCount: activePromotions.length,
+      potentialValueOfActivePromotions,
       tierCounts,
-      estimatedMRR: Math.round(totalRevenue * 1.5),
-      promotedListings: promotedListings.slice(0, 50),
+      promotedListings: activePromotions.slice(0, 50),
     };
   });
 
@@ -856,14 +873,19 @@ export const adminModule: FastifyPluginAsync = async (server) => {
 
   // ─── [ФИЧА 29] BACKUPS & SNAPSHOTS ──────────────────────────────────────────
   server.get('/system/backups', { preHandler: settingsHandler }, async (request, reply) => {
-    const [listingsCount, usersCount, reportsCount] = await Promise.all([
+    const [listingsCount, usersCount, reportsCount, lastSnapshot] = await Promise.all([
       request.server.prisma.listing.count(),
       request.server.prisma.user.count(),
       request.server.prisma.listingReport.count(),
+      request.server.prisma.backupSnapshot.findFirst({
+        where: { status: 'COMPLETED' },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     return {
-      lastAutomaticBackup: new Date(Date.now() - 6 * 3600 * 1000).toISOString(),
+      lastAutomaticBackup: lastSnapshot?.createdAt ? lastSnapshot.createdAt.toISOString() : null,
+      lastBackupType: lastSnapshot?.type ?? null,
       snapshotStats: {
         listings: listingsCount,
         users: usersCount,
@@ -873,13 +895,29 @@ export const adminModule: FastifyPluginAsync = async (server) => {
   });
 
   server.get('/system/backups/export-snapshot', { preHandler: settingsHandler }, async (request, reply) => {
-    const [users, listings, settings] = await Promise.all([
+    const [users, listings, settings, reportsCount] = await Promise.all([
       request.server.prisma.user.findMany({
         select: { id: true, name: true, email: true, phone: true, role: true, createdAt: true },
       }),
       request.server.prisma.listing.findMany({ take: 500 }),
       request.server.prisma.siteSettings.findFirst(),
+      request.server.prisma.listingReport.count(),
     ]);
+
+    const adminUserId = (request as any).user?.userId || null;
+
+    await request.server.prisma.backupSnapshot.create({
+      data: {
+        triggeredBy: adminUserId,
+        type: 'MANUAL',
+        status: 'COMPLETED',
+        recordCounts: {
+          listings: listings.length,
+          users: users.length,
+          reports: reportsCount,
+        },
+      },
+    });
 
     const snapshot = {
       timestamp: new Date().toISOString(),

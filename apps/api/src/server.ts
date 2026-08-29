@@ -107,7 +107,18 @@ server.register(fastifyCors, {
 server.register(fastifyRateLimit, {
   redis,
   global: true,
-  max: config.RATE_LIMIT_MAX,
+  max: async (req) => {
+    try {
+      const siteSettings = await prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
+      if (siteSettings?.adaptiveRateLimitEnabled) {
+        // При включенном адаптивном лимите: снижаем лимит для публичных страниц каталога и поиска
+        if (req.url.startsWith('/listings') || req.url.startsWith('/analytics/search-queries')) {
+          return 40; // 40 запросов в минуту при строгом режиме
+        }
+      }
+    } catch {}
+    return config.RATE_LIMIT_MAX;
+  },
   timeWindow: config.RATE_LIMIT_WINDOW,
   skipOnError: true,
   errorResponseBuilder: (_req, context) => ({
@@ -348,10 +359,12 @@ server.setNotFoundHandler((request, reply) => {
 
 import { startTelegramBot, stopTelegramBot } from './lib/telegram';
 import { expirePromotions } from './lib/jobs/expire-promotions';
+import { runScheduledBackup } from './lib/jobs/scheduled-backup';
 
 // ─── Запуск и Graceful Shutdown ───────────────────────────────────────────────
 
 let promotionsInterval: NodeJS.Timeout | null = null;
+let scheduledBackupInterval: NodeJS.Timeout | null = null;
 
 const start = async () => {
   try {
@@ -372,6 +385,47 @@ const start = async () => {
         server.log.error({ err }, '[Promotions] Error in expirePromotions interval');
       });
     }, 60 * 60 * 1000);
+
+    // Первичная запись снапшота целостности базы данных
+    runScheduledBackup(prisma, server.log).catch((err) => {
+      server.log.error({ err }, '[Backup] Error during startup runScheduledBackup check');
+    });
+
+    // Периодическая проверка целостности и снапшот данных (каждые 24 часа)
+    scheduledBackupInterval = setInterval(() => {
+      runScheduledBackup(prisma, server.log).catch((err) => {
+        server.log.error({ err }, '[Backup] Error in runScheduledBackup interval');
+      });
+    }, 24 * 60 * 60 * 1000);
+
+    // Предупреждение о включённых флагах Категории 2 (без полной бэкенд-интеграции)
+    try {
+      const siteSettings = await prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
+      const unimplementedFlags = [
+        'paymeClickEnabled',
+        'autoFiscalizationEnabled',
+        'smsGatewayEnabled',
+        'oneIdAuthEnabled',
+        'yandexRealtyXmlEnabled',
+        'geoIpValidationEnabled',
+        'fieldEncryptionEnabled',
+        'sessionQuarantineEnabled',
+        'deviceIpBanEnabled',
+        'tokenRotationEnabled',
+        'thunderingHerdEnabled',
+        'watermarkDetectorEnabled',
+        'openTelemetryEnabled',
+      ];
+      const enabledUnimplemented = unimplementedFlags.filter(
+        (flag) => (siteSettings as any)?.[flag] === true,
+      );
+      if (enabledUnimplemented.length > 0) {
+        server.log.warn(
+          { flags: enabledUnimplemented },
+          '[Config] Включены флаги без реальной backend-логики — они помечены как «В разработке» и не влияют на поведение системы',
+        );
+      }
+    } catch {}
   } catch (err) {
     server.log.error(err, 'Failed to start server');
     process.exit(1);
@@ -383,6 +437,9 @@ const shutdown = async (signal: string) => {
   try {
     if (promotionsInterval) {
       clearInterval(promotionsInterval);
+    }
+    if (scheduledBackupInterval) {
+      clearInterval(scheduledBackupInterval);
     }
     stopTelegramBot();
     await server.close();

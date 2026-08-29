@@ -31,9 +31,16 @@ export const loginHandler = async (
     return reply.status(403).send({ message: 'User account is blocked' });
   }
 
-  // Если пользователь является администратором или супер-администратором — требуем 2FA через Telegram
-  const isSuperAdmin = user.role === 'ADMIN' || user.adminRole === 'SUPER_ADMIN';
-  if (isSuperAdmin) {
+  // Если включена глобальная 2FA или пользователь является SUPER_ADMIN
+  const settings = await request.server.prisma.siteSettings.findUnique({
+    where: { id: 'singleton' },
+  });
+
+  const require2FA =
+    user.adminRole === 'SUPER_ADMIN' ||
+    (settings?.twoFactorAuthEnabled === true && (user.role === 'ADMIN' || !!user.adminRole));
+
+  if (require2FA) {
     // Генерируем 6-значный код
     const code = Math.floor(100000 + crypto.randomInt(900000)).toString();
     const tempToken = crypto.randomBytes(32).toString('hex');
