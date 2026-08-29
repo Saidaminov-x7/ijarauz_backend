@@ -110,6 +110,14 @@ export const updateSiteSettingsSchema = z.object({
   openTelemetryEnabled: z.boolean().optional(),
   yandexMetrikaId: z.string().max(50).optional(),
   yandexMetrikaEnabled: z.boolean().optional(),
+  navLinks: z.array(
+    z.object({
+      label: z.string().min(1),
+      href: z.string().min(1),
+      position: z.enum(['header', 'footer']),
+    })
+  ).optional().nullable(),
+  maintenancePasswordEnabled: z.boolean().optional(),
   maintenanceBypassPassword: z.string().max(100).optional().nullable(),
 });
 
