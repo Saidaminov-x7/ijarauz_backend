@@ -5,7 +5,10 @@ import { Redis } from 'ioredis';
 import { FastifyBaseLogger } from 'fastify';
 import { config } from '../config';
 
-const TELEGRAM_API_BASE = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}`;
+function getTelegramApiBase(): string | null {
+  return config.TELEGRAM_BOT_TOKEN ? `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}` : null;
+}
+
 const REDIS_CHAT_ID_KEY = 'telegram:admin:chat_id';
 
 let pollingActive = false;
@@ -21,8 +24,16 @@ export async function sendTelegramMessage(
   parseMode: 'HTML' | 'Markdown' = 'HTML',
   logger?: FastifyBaseLogger,
 ): Promise<boolean> {
+  const apiBase = getTelegramApiBase();
+  if (!apiBase) {
+    if (logger) {
+      logger.warn('[Telegram] TELEGRAM_BOT_TOKEN is not configured. Message skipped.');
+    }
+    return false;
+  }
+
   try {
-    const res = await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
+    const res = await fetch(`${apiBase}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -106,8 +117,11 @@ export function startTelegramBot(redis: Redis, logger?: FastifyBaseLogger) {
   const poll = async () => {
     if (!pollingActive) return;
 
+    const apiBase = getTelegramApiBase();
+    if (!apiBase) return;
+
     try {
-      const res = await fetch(`${TELEGRAM_API_BASE}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`, {
+      const res = await fetch(`${apiBase}/getUpdates?offset=${lastUpdateId + 1}&timeout=30`, {
         signal: AbortSignal.timeout(35000),
       });
 

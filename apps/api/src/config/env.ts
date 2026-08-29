@@ -16,11 +16,11 @@ const envSchema = z.object({
 
   // JWT
   JWT_SECRET: z.string().min(32, 'JWT_SECRET должен быть минимум 32 символа'),
-  REFRESH_SECRET: z.string().min(32, 'REFRESH_SECRET must be at least 32 characters').default('e7a2b9c4f1d8e3a5c7f2b6a9d1e4f8c2b5e7a1d3f9c4b8e2a6d1f5c7b3e9a4f2'),
+  REFRESH_SECRET: z.string().min(32, 'REFRESH_SECRET must be at least 32 characters'),
   GOOGLE_CLIENT_ID: z.string().optional(),
 
   // Telegram 2FA & Notification Bot
-  TELEGRAM_BOT_TOKEN: z.string().default('8919102582:AAEymMUXVkuVN6tof9UsCDWxW95vV9-2TQU'),
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ADMIN_CHAT_ID: z.string().optional(),
 
   // CORS — список доменов через запятую, например: https://ijarauz.uz,https://www.ijarauz.uz
@@ -71,6 +71,16 @@ function parseConfig() {
     parsed.JWT_SECRET === 'your_jwt_secret_min_32_characters_long_super_secure'
   ) {
     throw new Error('FATAL: JWT_SECRET использует значение-заглушку из .env.example!');
+  }
+
+  if (
+    parsed.REFRESH_SECRET === 'your_refresh_secret' ||
+    parsed.REFRESH_SECRET === 'your_refresh_secret_min_32_characters_long_super_secure' ||
+    parsed.REFRESH_SECRET === 'e7a2b9c4f1d8e3a5c7f2b6a9d1e4f8c2b5e7a1d3f9c4b8e2a6d1f5c7b3e9a4f2'
+  ) {
+    throw new Error(
+      'FATAL: REFRESH_SECRET использует скомпрометированное значение по умолчанию или плейсхолдер! Сгенерируйте уникальный ключ через `openssl rand -hex 32`.'
+    );
   }
 
   // В production проверяем обязательность Cloudinary конфигурации
