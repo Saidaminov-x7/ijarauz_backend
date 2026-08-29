@@ -26,6 +26,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
       select: {
         maintenanceMode: true,
         maintenanceMessage: true,
+        maintenancePasswordEnabled: true,
         siteName: true,
         contactEmail: true,
         contactPhone: true,
@@ -45,6 +46,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
       settings = {
         maintenanceMode: false,
         maintenanceMessage: null,
+        maintenancePasswordEnabled: false,
         siteName: 'Ijarauz',
         contactEmail: 'support@ijarauz.uz',
         contactPhone: '+998 71 200-00-00',
