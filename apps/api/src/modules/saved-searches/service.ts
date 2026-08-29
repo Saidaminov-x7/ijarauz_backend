@@ -11,6 +11,11 @@ export class SavedSearchesService {
   ) {}
 
   async create(userId: string, dto: CreateSavedSearchDto) {
+    const existingCount = await this.prisma.savedSearch.count({ where: { userId } });
+    if (existingCount >= 20) {
+      throw Object.assign(new Error('Достигнут лимит сохранённых поисков (20 на пользователя)'), { statusCode: 400 });
+    }
+
     return this.prisma.savedSearch.create({
       data: {
         userId,
@@ -27,10 +32,21 @@ export class SavedSearchesService {
     });
   }
 
-  async delete(id: string, userId: string) {
+  async getById(id: string, requestingUserId: string, isAdmin = false) {
+    const entity = await this.prisma.savedSearch.findUnique({ where: { id } });
+    if (!entity) {
+      throw Object.assign(new Error('Saved search not found'), { statusCode: 404 });
+    }
+    if (!isAdmin && entity.userId !== requestingUserId) {
+      throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+    }
+    return entity;
+  }
+
+  async delete(id: string, userId: string, isAdmin = false) {
     const existing = await this.prisma.savedSearch.findUnique({ where: { id } });
     if (!existing) throw Object.assign(new Error('Saved search not found'), { statusCode: 404 });
-    if (existing.userId !== userId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+    if (!isAdmin && existing.userId !== userId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
 
     await this.prisma.savedSearch.delete({ where: { id } });
   }

@@ -35,11 +35,19 @@ export const notificationsModule: FastifyPluginAsync = async (server) => {
     };
   });
 
-  /**
-   * PATCH /admin/notifications/:id/read — отметить уведомление прочитанным
-   */
   server.patch<{ Params: { id: string } }>('/:id/read', { preHandler }, async (request, reply) => {
     const { id } = request.params;
+    const adminId = request.user.userId;
+    const isSuperAdmin = request.user.role === 'ADMIN' || (request.user as any).adminRole === 'SUPER_ADMIN';
+
+    const existing = await server.prisma.adminNotification.findUnique({ where: { id } });
+    if (!existing) {
+      return reply.status(404).send({ message: 'Notification not found' });
+    }
+
+    if (existing.targetAdminId && existing.targetAdminId !== adminId && !isSuperAdmin) {
+      return reply.status(403).send({ message: 'Forbidden' });
+    }
 
     const updated = await server.prisma.adminNotification.update({
       where: { id },

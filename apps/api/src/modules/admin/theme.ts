@@ -33,6 +33,8 @@ export const themeModule: FastifyPluginAsync = async (server) => {
     const dto = updateThemeSchema.parse(request.body);
     const service = getService(request);
     const settings = await service.updateThemeSettings(dto, request.user.userId, request.ip);
+    // C2: Инвалидируем публичный Redis-кэш темы после обновления
+    await request.server.redis.del('site:theme:public').catch(() => {});
     return settings;
   });
 };

@@ -1,9 +1,22 @@
 // apps/api/src/modules/media/index.ts
 
 import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import FileType from 'file-type';
 import { authMiddleware } from '../../lib/authMiddleware';
+import { adminMiddleware } from '../../lib/adminMiddleware';
 import { MediaService } from './service';
-import { uploadQuerySchema } from './schemas';
+import { uploadQuerySchema, mediaListQuerySchema } from './schemas';
+
+const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+async function validateFileType(buffer: Buffer) {
+  const detected = await FileType.fromBuffer(buffer);
+  if (!detected || !ALLOWED_MIME.includes(detected.mime)) {
+    const error = new Error('INVALID_FILE_TYPE: Поддерживаются только изображения (JPEG, PNG, WEBP, GIF)') as Error & { statusCode: number };
+    error.statusCode = 400;
+    throw error;
+  }
+}
 
 export const mediaModule: FastifyPluginAsync = async (server) => {
   const getService = (req: FastifyRequest) => new MediaService(req.server.prisma, undefined, req.log);
@@ -36,6 +49,9 @@ export const mediaModule: FastifyPluginAsync = async (server) => {
     }
     const buffer = Buffer.concat(chunks);
 
+    // Проверяем сигнатуру (magic bytes) файла
+    await validateFileType(buffer);
+
     const service = getService(request);
     const isAdmin = request.user.role === 'ADMIN';
     try {
@@ -48,7 +64,12 @@ export const mediaModule: FastifyPluginAsync = async (server) => {
       return reply.status(201).send(media);
     } catch (err) {
       const error = err as Error & { statusCode?: number };
-      return reply.status(error.statusCode ?? 500).send({ message: error.message });
+      const statusCode = error.statusCode ?? 500;
+      if (statusCode >= 500) {
+        request.log.error({ err: error }, '[MediaUpload] Failed to upload media');
+        return reply.status(500).send({ message: 'Не удалось загрузить файл, попробуйте позже' });
+      }
+      return reply.status(statusCode).send({ message: error.message });
     }
   });
 
@@ -105,14 +126,10 @@ export const mediaModule: FastifyPluginAsync = async (server) => {
    * GET /media — список всех медиафайлов (для библиотеки и админки)
    */
   server.get('/', {
-    preHandler: [authMiddleware],
+    preHandler: [adminMiddleware],
   }, async (request: FastifyRequest, _reply: FastifyReply) => {
-    const { page = 1, limit = 24, mimeType } = request.query as {
-      page?: number;
-      limit?: number;
-      mimeType?: string;
-    };
+    const query = mediaListQuerySchema.parse(request.query);
     const service = getService(request);
-    return service.listAll(Number(page), Number(limit), mimeType);
+    return service.list(query);
   });
 };

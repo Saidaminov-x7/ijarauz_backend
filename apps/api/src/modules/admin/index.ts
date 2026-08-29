@@ -420,6 +420,17 @@ export const adminModule: FastifyPluginAsync = async (server) => {
     }
     const buffer = Buffer.concat(chunks);
 
+    const FileType = (await import('file-type')).default;
+    const detected = await FileType.fromBuffer(buffer);
+    const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+    if (!detected || !ALLOWED.includes(detected.mime)) {
+      // Разрешаем также SVG если это валидный XML/SVG
+      const isSvg = buffer.slice(0, 100).toString().includes('<svg');
+      if (!isSvg) {
+        return reply.status(400).send({ message: 'INVALID_FILE_TYPE: Поддерживаются только изображения (JPEG, PNG, WEBP, GIF, SVG)' });
+      }
+    }
+
     const service = getService(request);
     try {
       const result = await service.uploadSiteLogo(
@@ -427,6 +438,7 @@ export const adminModule: FastifyPluginAsync = async (server) => {
         request.user.userId,
         request.ip,
       );
+      await request.server.redis.del('site:settings:public').catch(() => {});
       return result;
     } catch (err) {
       const error = err as Error & { statusCode?: number };
@@ -441,6 +453,7 @@ export const adminModule: FastifyPluginAsync = async (server) => {
     const service = getService(request);
     try {
       const result = await service.deleteSiteLogo(request.user.userId, request.ip);
+      await request.server.redis.del('site:settings:public').catch(() => {});
       return result;
     } catch (err) {
       const error = err as Error & { statusCode?: number };

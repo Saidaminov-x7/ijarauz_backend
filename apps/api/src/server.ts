@@ -5,6 +5,7 @@ import fastify from 'fastify';
 import { fastifyHelmet } from '@fastify/helmet';
 import { fastifyCors } from '@fastify/cors';
 import { fastifyRateLimit } from '@fastify/rate-limit';
+import fastifyCompress from '@fastify/compress';
 import { fastifySwagger } from '@fastify/swagger';
 import { fastifySwaggerUi } from '@fastify/swagger-ui';
 import { fastifyJwt } from '@fastify/jwt';
@@ -35,7 +36,17 @@ import { viewingRequestsModule } from './modules/viewing-requests';
 // ─── Инициализация клиентов ───────────────────────────────────────────────────
 
 const prisma = new PrismaClient({
-  log: config.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  log:
+    config.NODE_ENV === 'development'
+      ? [{ emit: 'event', level: 'query' }, { emit: 'stdout', level: 'error' }, { emit: 'stdout', level: 'warn' }]
+      : [{ emit: 'event', level: 'query' }, { emit: 'stdout', level: 'error' }],
+});
+
+// C6: Предупреждение о медленных Prisma-запросах (> 500мс)
+prisma.$on('query', (e) => {
+  if (e.duration > 500) {
+    console.warn(`[SLOW QUERY] ${e.duration}ms: ${e.query.slice(0, 200)}`);
+  }
 });
 
 const redis = new Redis(config.REDIS_URL, {
@@ -71,8 +82,19 @@ redis.on('error', (err) => {
 
 // ─── Плагины безопасности ─────────────────────────────────────────────────────
 
+// C4: Gzip/Brotli сжатие ответов (регистрировать до роутов)
+server.register(fastifyCompress, { global: true, encodings: ['br', 'gzip', 'deflate'] });
+
 server.register(fastifyHelmet, {
-  contentSecurityPolicy: config.NODE_ENV === 'production',
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'res.cloudinary.com', 'data:'],
+      connectSrc: ["'self'", ...config.CORS_ORIGINS],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    },
+  },
 });
 
 server.register(fastifyCors, {
@@ -150,10 +172,16 @@ if (config.NODE_ENV !== 'production') {
   });
 }
 
+import { registerErrorHandler } from './lib/errorHandler';
+import { v2 as cloudinary } from 'cloudinary';
+
 // ─── Декораторы DI ────────────────────────────────────────────────────────────
 
 server.decorate('prisma', prisma);
 server.decorate('redis', redis);
+
+// ─── Единый обработчик ошибок ────────────────────────────────────────────────
+registerErrorHandler(server);
 
 // ─── Маршруты модулей ─────────────────────────────────────────────────────────
 
@@ -180,9 +208,19 @@ server.register(pagesPublicModule, { prefix: '/pages' });
 
 // ─── Health-check эндпоинты ───────────────────────────────────────────────────
 
+// B2: Health с реальной проверкой DB + Redis
 server.get('/health', {
   schema: { tags: ['Health'] },
-}, async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+}, async (_req, reply) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    await redis.ping();
+    return reply.send({ status: 'ok', db: 'up', redis: 'up', timestamp: new Date().toISOString() });
+  } catch (err) {
+    server.log.error({ err }, 'Health check failed');
+    return reply.status(503).send({ status: 'degraded', db: 'unknown', redis: 'unknown', error: (err as Error).message });
+  }
+});
 
 server.get('/health/live', {
   schema: { tags: ['Health'] },
@@ -191,14 +229,63 @@ server.get('/health/live', {
 server.get('/health/ready', {
   schema: { tags: ['Health'] },
 }, async (_req, reply) => {
+  const checks: Record<string, boolean> = {};
+
   try {
     await prisma.$queryRaw`SELECT 1`;
+    checks.database = true;
+  } catch {
+    checks.database = false;
+  }
+
+  try {
     const pong = await redis.ping();
-    if (pong !== 'PONG') throw new Error('Redis not responding');
-    return { status: 'ready', timestamp: new Date().toISOString() };
-  } catch (err) {
-    server.log.error({ err }, 'Health check failed');
-    return reply.status(503).send({ status: 'not_ready', error: (err as Error).message });
+    checks.redis = pong === 'PONG';
+  } catch {
+    checks.redis = false;
+  }
+
+  if (config.CLOUDINARY_CLOUD_NAME && config.CLOUDINARY_API_KEY && config.CLOUDINARY_API_SECRET) {
+    try {
+      cloudinary.config({
+        cloud_name: config.CLOUDINARY_CLOUD_NAME,
+        api_key: config.CLOUDINARY_API_KEY,
+        api_secret: config.CLOUDINARY_API_SECRET,
+      });
+      await cloudinary.api.ping();
+      checks.cloudinary = true;
+    } catch {
+      checks.cloudinary = false;
+    }
+  }
+
+  const allHealthy = Object.values(checks).every(Boolean);
+  return reply.status(allHealthy ? 200 : 503).send({
+    status: allHealthy ? 'ready' : 'degraded',
+    checks,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// B1: Запись в AuditLog при 401/403 (security events)
+server.addHook('onResponse', async (request, reply) => {
+  if (reply.statusCode === 401 || reply.statusCode === 403) {
+    prisma.auditLog.create({
+      data: {
+        userId: (request as any).user?.userId ?? null,
+        action: 'SECURITY_DENIED',
+        resource: request.url,
+        meta: {
+          path: request.url,
+          method: request.method,
+          statusCode: reply.statusCode,
+          ip: request.ip,
+        },
+        ip: request.ip,
+        userAgent: request.headers['user-agent'] ?? null,
+        timestamp: new Date(),
+      },
+    }).catch((err) => server.log.error({ err }, 'Failed to write security audit log'));
   }
 });
 

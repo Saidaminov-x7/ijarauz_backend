@@ -61,16 +61,27 @@ export class PublicAIService {
         ...history.slice(-10),
         { role: 'user', content: message },
       ];
-      const response = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        signal: AbortSignal.timeout(20_000),
-        body: JSON.stringify({ model: config.OLLAMA_MODEL, messages, stream: false, options: { temperature: 0.7, num_ctx: 4096 } }),
-      });
-      if (!response.ok) throw new Error(`AI service returned ${response.status}`);
-      const data = await response.json() as { message?: { content?: string } };
-      if (!data.message?.content) throw new Error('AI service returned an empty response');
-      return { response: data.message.content, listings: catalog };
+      try {
+        const response = await fetch(`${config.OLLAMA_BASE_URL}/api/chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: AbortSignal.timeout(8_000),
+          body: JSON.stringify({ model: config.OLLAMA_MODEL, messages, stream: false, options: { temperature: 0.7, num_ctx: 4096 } }),
+        });
+        if (response.ok) {
+          const data = (await response.json()) as { message?: { content?: string } };
+          if (data.message?.content) {
+            return { response: data.message.content, listings: catalog };
+          }
+        }
+      } catch {
+        // Fallback при недоступности AI-модели
+      }
+
+      const fallbackText = catalog.length > 0
+        ? `Вот подходящие варианты из нашего каталога (${catalog.length} найдено). Вы можете ознакомиться с ними ниже:`
+        : 'Здравствуйте! Я помогу вам найти жильё в Узбекистане. Уточните город, район, количество комнат или бюджет.';
+      return { response: fallbackText, listings: catalog };
     });
   }
 

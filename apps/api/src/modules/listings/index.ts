@@ -2,6 +2,7 @@
 
 import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { authMiddleware } from '../../lib/authMiddleware';
+import { createUserRateLimit } from '../../lib/userRateLimit';
 import { ListingsService } from './service';
 import {
   createListingSchema,
@@ -15,7 +16,26 @@ import {
 } from './schemas';
 
 export const listingsModule: FastifyPluginAsync = async (server) => {
-  const getService = (req: FastifyRequest) => new ListingsService(req.server.prisma, req.log);
+  const getService = (req: FastifyRequest) => new ListingsService(req.server.prisma, req.server.redis, req.log);
+
+  // Rate-limiters по userId
+  const createListingRateLimit = createUserRateLimit((req) => req.server.redis, {
+    keyPrefix: 'listings:create',
+    max: 10,
+    windowSec: 3600, // 10 объявлений в час на пользователя
+  });
+
+  const favoriteRateLimit = createUserRateLimit((req) => req.server.redis, {
+    keyPrefix: 'listings:favorite',
+    max: 60,
+    windowSec: 3600, // 60 действий в час
+  });
+
+  const reportRateLimit = createUserRateLimit((req) => req.server.redis, {
+    keyPrefix: 'listings:report',
+    max: 10,
+    windowSec: 3600, // 10 жалоб в час
+  });
 
   // ─── Публичные маршруты ───────────────────────────────────────────────
 
@@ -85,7 +105,9 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
   /**
    * POST /listings/:id/report — отправить жалобу на объявление
    */
-  server.post<{ Params: { id: string } }>('/:id/report', async (request, reply) => {
+  server.post<{ Params: { id: string } }>('/:id/report', {
+    preHandler: [authMiddleware, reportRateLimit],
+  }, async (request, reply) => {
     const dto = reportListingSchema.parse(request.body);
     const service = getService(request);
     try {
@@ -121,7 +143,7 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
    * POST /listings — создать объявление
    */
   server.post<{ Body: CreateListingDto }>('/', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, createListingRateLimit],
   }, async (request, reply) => {
     const dto = createListingSchema.parse(request.body);
     const service = getService(request);
@@ -205,7 +227,7 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
    * POST /listings/:id/favorite — добавить/убрать из избранного
    */
   server.post<{ Params: { id: string } }>('/:id/favorite', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, favoriteRateLimit],
   }, async (request, _reply) => {
     const service = getService(request);
     const result = await service.toggleFavorite(request.user.userId, request.params.id);

@@ -197,6 +197,7 @@ model Listing {
   @@index([isVerified])
   @@index([createdAt])
   @@index([viewsCount])
+  @@index([city, district, type, status, price])
 }
 
 model Favorite {
@@ -345,6 +346,9 @@ model SiteSettings {
   maxImagesPerListing   Int      @default(10)
   listingsPerPage       Int      @default(10)  // Количество объявлений на странице в админке
   logoUrl               String?  // URL логотипа платформы
+  logoMediaKey          String?  // Ключ медиа-файла для удаления в Cloudinary/storage
+  vipBoostEnabled       Boolean  @default(true) // Feature-flag: VIP буст
+  verificationEnabled   Boolean  @default(true) // Feature-flag: верификация
   navLinks              Json?    // Навигационные ссылки для шапки/подвала
   updatedAt             DateTime @updatedAt
   updatedById           String?

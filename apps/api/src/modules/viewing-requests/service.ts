@@ -12,6 +12,21 @@ export function createViewingRequestsService(prisma: PrismaClient) {
         throw error;
       }
 
+      // Защита от спама: не более 5 заявок в сутки от одного пользователя на одно объявление
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const recentCount = await prisma.viewingRequest.count({
+        where: {
+          listingId,
+          requesterId,
+          createdAt: { gte: oneDayAgo },
+        },
+      });
+      if (recentCount >= 5) {
+        const error = new Error('Вы уже отправили максимальное количество заявок на этот объект за последние 24 часа') as Error & { statusCode: number };
+        error.statusCode = 400;
+        throw error;
+      }
+
       const request = await prisma.viewingRequest.create({
         data: {
           listingId,

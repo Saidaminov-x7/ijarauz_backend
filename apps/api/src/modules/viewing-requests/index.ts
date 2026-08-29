@@ -2,6 +2,7 @@
 
 import { FastifyPluginAsync } from 'fastify';
 import { authMiddleware } from '../../lib/authMiddleware';
+import { createUserRateLimit } from '../../lib/userRateLimit';
 import { createViewingRequestsService } from './service';
 import { createViewingRequestSchema, updateViewingStatusSchema } from './schemas';
 import { ViewingStatus } from '@prisma/client';
@@ -9,11 +10,17 @@ import { ViewingStatus } from '@prisma/client';
 export const viewingRequestsModule: FastifyPluginAsync = async (server) => {
   const getService = (req: any) => createViewingRequestsService(req.prisma);
 
+  const viewingRequestRateLimit = createUserRateLimit((req) => req.server.redis, {
+    keyPrefix: 'viewing-requests:create',
+    max: 15,
+    windowSec: 3600, // 15 заявок в час
+  });
+
   /**
    * POST /listings/:id/viewing-requests — подать заявку на просмотр
    */
   server.post<{ Params: { id: string } }>('/listings/:id/viewing-requests', {
-    preHandler: [authMiddleware],
+    preHandler: [authMiddleware, viewingRequestRateLimit],
   }, async (request, reply) => {
     const dto = createViewingRequestSchema.parse(request.body);
     const service = getService(request);

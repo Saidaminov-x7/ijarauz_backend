@@ -53,9 +53,11 @@ class AIModerationService {
         - fraudScore: number (0-1, вероятность мошенничества)
       `;
 
+      // C7: Таймаут 5 секунд — недоступность Ollama не блокирует публикацию объявления
       const response = await fetch(`${this.ollamaBaseUrl}/api/generate`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(5_000),
         body: JSON.stringify({ model: this.ollamaModel, prompt, format: 'json', stream: false }),
       });
       if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
@@ -111,14 +113,31 @@ class AIModerationQueue {
 
 const sharedAIModerationQueue = new AIModerationQueue(new AIModerationService());
 
+import { Redis } from 'ioredis';
+
 export class ListingsService {
   private readonly aiModerationQueue: AIModerationQueue;
 
   constructor(
     private readonly prisma: PrismaClient,
+    private readonly redis?: Redis,
     private readonly logger?: FastifyBaseLogger,
   ) {
     this.aiModerationQueue = sharedAIModerationQueue;
+  }
+
+  async invalidateCatalogCache(): Promise<void> {
+    if (!this.redis) return;
+    try {
+      const keys = await this.redis.keys('catalog:*');
+      if (keys.length > 0) {
+        await this.redis.del(...keys);
+      }
+    } catch (err) {
+      if (this.logger) {
+        this.logger.warn({ err }, '[ListingsService] Failed to invalidate catalog cache');
+      }
+    }
   }
 
   /**
@@ -188,6 +207,8 @@ export class ListingsService {
       },
     });
 
+    this.invalidateCatalogCache().catch(() => {});
+
     // Создаем системное уведомление для администраторов (только если не автомодерация)
     if (!settings?.autoModerationEnabled) {
       this.prisma.adminNotification.create({
@@ -252,6 +273,16 @@ export class ListingsService {
       }),
     };
 
+    const cacheKey = this.redis ? `catalog:${JSON.stringify(filter)}` : null;
+    if (cacheKey && this.redis) {
+      try {
+        const cached = await this.redis.get(cacheKey);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      } catch {}
+    }
+
     const [items, total] = await this.prisma.$transaction([
       this.prisma.listing.findMany({
         where,
@@ -267,7 +298,7 @@ export class ListingsService {
       this.prisma.listing.count({ where }),
     ]);
 
-    return {
+    const result = {
       items,
       meta: {
         total,
@@ -276,6 +307,12 @@ export class ListingsService {
         totalPages: Math.ceil(total / limit),
       },
     };
+
+    if (cacheKey && this.redis) {
+      this.redis.set(cacheKey, JSON.stringify(result), 'EX', 45).catch(() => {});
+    }
+
+    return result;
   }
 
   /**
@@ -336,7 +373,7 @@ export class ListingsService {
       });
     }
 
-    return this.prisma.listing.update({
+    const updated = await this.prisma.listing.update({
       where: { id },
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
@@ -359,6 +396,9 @@ export class ListingsService {
       },
       include: { owner: { select: { id: true, name: true, avatar: true } }, images: true },
     });
+
+    this.invalidateCatalogCache().catch(() => {});
+    return updated;
   }
 
   /**
@@ -375,6 +415,8 @@ export class ListingsService {
       where: { id },
       data: { status: ListingStatus.DELETED },
     });
+
+    this.invalidateCatalogCache().catch(() => {});
   }
 
   /**
@@ -463,13 +505,16 @@ export class ListingsService {
     const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
     const isAutoModerated = settings?.autoModerationEnabled === true;
 
-    return this.prisma.listing.update({
+    const updated = await this.prisma.listing.update({
       where: { id },
       data: {
         status: ListingStatus.ACTIVE,
         moderationStatus: isAutoModerated ? ModerationStatus.APPROVED : ModerationStatus.PENDING,
       },
     });
+
+    this.invalidateCatalogCache().catch(() => {});
+    return updated;
   }
 
   /**
@@ -481,6 +526,11 @@ export class ListingsService {
     tier: 'BASIC' | 'TOP' | 'URGENT',
     days: number,
   ): Promise<Listing> {
+    const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
+    if (settings && settings.vipBoostEnabled === false) {
+      throw Object.assign(new Error('Функция VIP-продвижения временно недоступна'), { statusCode: 503 });
+    }
+
     const listing = await this.prisma.listing.findUnique({ where: { id: listingId } });
     if (!listing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
     if (listing.ownerId !== ownerId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
@@ -607,6 +657,31 @@ export class ListingsService {
       confidence: comparables.length >= 10 ? 'high' : 'medium',
       sampleSize: comparables.length,
     };
+  }
+
+  /**
+   * Курсорная пагинация (по createdAt + id) для высокой производительности на больших смещениях
+   */
+  async findManyCursor(cursor?: string, limit = 20) {
+    const items = await this.prisma.listing.findMany({
+      take: limit + 1,
+      where: {
+        status: ListingStatus.ACTIVE,
+        moderationStatus: ModerationStatus.APPROVED,
+      },
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      include: {
+        images: { select: { id: true, url: true, mimeType: true } },
+        owner: { select: { id: true, name: true, avatar: true } },
+      },
+    });
+
+    const hasMore = items.length > limit;
+    const pageItems = hasMore ? items.slice(0, -1) : items;
+    const nextCursor = hasMore && pageItems.length > 0 ? pageItems[pageItems.length - 1].id : null;
+
+    return { items: pageItems, nextCursor };
   }
 
   /**

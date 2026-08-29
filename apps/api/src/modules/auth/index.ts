@@ -11,9 +11,15 @@ import { googleAuthHandler } from './google';
 import { authMiddleware } from '../../lib/authMiddleware';
 
 export const authModule: FastifyPluginAsync = async (server) => {
-  // Регистрация нового пользователя (лимит 5 попыток в минуту)
+  // Регистрация нового пользователя
   server.post('/register', {
-    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.email || (req.body as any)?.phone || 'unknown'}`,
+      },
+    },
   }, registerHandler);
 
   // Google OAuth — sign in or sign up with phone verification
@@ -21,14 +27,26 @@ export const authModule: FastifyPluginAsync = async (server) => {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, googleAuthHandler);
 
-  // Вход / получение токенов (защита от брутфорса: 5 попыток в минуту)
+  // Вход / получение токенов (защита от брутфорса: 5 попыток за 15 минут на связку IP:аккаунт)
   server.post('/login', {
-    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.email || (req.body as any)?.phone || 'unknown'}`,
+      },
+    },
   }, loginHandler);
 
   // Верификация 2FA кода из Telegram
   server.post('/verify-2fa', {
-    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.phone || 'unknown'}`,
+      },
+    },
   }, verify2faHandler);
 
   // Повторная отправка 2FA кода в Telegram

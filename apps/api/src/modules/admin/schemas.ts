@@ -87,6 +87,8 @@ export const updateSiteSettingsSchema = z.object({
   maxImagesPerListing: z.coerce.number().int().min(1).max(50).optional(),
   listingsPerPage: z.coerce.number().int().min(1).max(100).optional(),
   logoUrl: z.string().url().optional().nullable(),
+  vipBoostEnabled: z.boolean().optional(),
+  verificationEnabled: z.boolean().optional(),
 });
 
 export type UpdateSiteSettingsDto = z.infer<typeof updateSiteSettingsSchema>;

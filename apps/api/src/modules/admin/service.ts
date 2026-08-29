@@ -1189,16 +1189,33 @@ export class AdminService {
    * Загрузить логотип сайта
    */
   async uploadSiteLogo(file: { filename: string; mimetype: string; data: Buffer }, adminId: string, ip?: string) {
+    // Получаем текущий логотип для возможной очистки старого
+    const currentSettings = await this.prisma.siteSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { logoUrl: true },
+    });
+
     const mediaService = new MediaService(this.prisma);
     const media = await mediaService.upload(file, adminId, undefined, true);
 
-    // Обновляем настройки с новым URL логотипа
+    // Если был старый логотип и он отличается от нового, удаляем старый из Media и хранилища
+    if (currentSettings?.logoUrl && currentSettings.logoUrl !== media.url) {
+      const oldMedia = await this.prisma.media.findFirst({
+        where: { url: currentSettings.logoUrl },
+      });
+      if (oldMedia) {
+        await mediaService.delete(oldMedia.id, adminId, true).catch(() => {});
+      }
+    }
+
+    // Обновляем настройки с новым URL логотипа и его ключом
     const settings = await this.prisma.siteSettings.upsert({
       where: { id: 'singleton' },
-      update: { logoUrl: media.url, updatedById: adminId },
+      update: { logoUrl: media.url, logoMediaKey: media.id, updatedById: adminId },
       create: {
         id: 'singleton',
         logoUrl: media.url,
+        logoMediaKey: media.id,
         updatedById: adminId,
       },
       include: {
@@ -1222,9 +1239,24 @@ export class AdminService {
    * Удалить логотип сайта
    */
   async deleteSiteLogo(adminId: string, ip?: string) {
+    const currentSettings = await this.prisma.siteSettings.findUnique({
+      where: { id: 'singleton' },
+      select: { logoUrl: true, logoMediaKey: true },
+    });
+
+    if (currentSettings?.logoUrl) {
+      const mediaService = new MediaService(this.prisma);
+      const oldMedia = await this.prisma.media.findFirst({
+        where: { url: currentSettings.logoUrl },
+      });
+      if (oldMedia) {
+        await mediaService.delete(oldMedia.id, adminId, true).catch(() => {});
+      }
+    }
+
     const settings = await this.prisma.siteSettings.upsert({
       where: { id: 'singleton' },
-      update: { logoUrl: null, updatedById: adminId },
+      update: { logoUrl: null, logoMediaKey: null, updatedById: adminId },
       create: {
         id: 'singleton',
         updatedById: adminId,

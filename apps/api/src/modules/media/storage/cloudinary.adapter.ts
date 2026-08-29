@@ -61,6 +61,16 @@ export class CloudinaryStorageAdapter implements IStorageAdapter {
         (error, result: UploadApiResponse | undefined) => {
           const durationMs = Date.now() - startTime;
           if (error || !result) {
+            let reason: 'auth' | 'quota' | 'network' | 'unknown' = 'unknown';
+            const msg = error?.message?.toLowerCase() || '';
+            if (msg.includes('invalid api') || msg.includes('unauthorized') || msg.includes('must supply api_key')) {
+              reason = 'auth';
+            } else if (msg.includes('quota') || msg.includes('limit') || msg.includes('rate limit')) {
+              reason = 'quota';
+            } else if (msg.includes('timeout') || msg.includes('network') || msg.includes('econnrefused') || msg.includes('enotfound')) {
+              reason = 'network';
+            }
+
             if (this.logger) {
               this.logger.error(
                 {
@@ -68,13 +78,14 @@ export class CloudinaryStorageAdapter implements IStorageAdapter {
                   filename: file.filename,
                   folder,
                   publicId,
+                  reason,
                   durationMs,
                 },
                 '[CloudinaryStorageAdapter] Upload failed',
               );
             }
             return reject(
-              new Error(`Cloudinary upload failed: ${error?.message || 'Unknown error'}`),
+              new Error(`Cloudinary upload failed (${reason}): ${error?.message || 'Unknown error'}`),
             );
           }
 
@@ -105,15 +116,64 @@ export class CloudinaryStorageAdapter implements IStorageAdapter {
     });
   }
 
-  async delete(key: string): Promise<void> {
+  /**
+   * Строит URL с Cloudinary-трансформацией на лету, без повторной загрузки.
+   */
+  getTransformedUrl(publicIdOrUrl: string, opts: { width?: number; height?: number; crop?: string } = { width: 400 }): string {
+    const publicId = this.extractPublicId(publicIdOrUrl);
+    return cloudinary.url(publicId, {
+      secure: true,
+      transformation: [
+        {
+          width: opts.width || 400,
+          height: opts.height,
+          crop: opts.crop || 'fill',
+          quality: 'auto',
+          fetch_format: 'auto',
+        },
+      ],
+    });
+  }
+
+  /**
+   * Извлекает public_id из полного Cloudinary URL или оставляет ключ как есть
+   */
+  private extractPublicId(keyOrUrl: string): string {
+    if (!keyOrUrl.startsWith('http://') && !keyOrUrl.startsWith('https://')) {
+      return keyOrUrl;
+    }
     try {
-      const result = await cloudinary.uploader.destroy(key);
+      const url = new URL(keyOrUrl);
+      // Путь вида /<cloud_name>/image/upload/(v<version>/)?<folder>/<publicId>.<ext>
+      const pathname = url.pathname;
+      const uploadIdx = pathname.indexOf('/upload/');
+      if (uploadIdx === -1) return keyOrUrl;
+      
+      let afterUpload = pathname.substring(uploadIdx + '/upload/'.length);
+      // Убираем версию если есть (v1234567890/)
+      afterUpload = afterUpload.replace(/^v\d+\//, '');
+      // Убираем расширение (.webp, .jpg и т.д.)
+      const lastDotIdx = afterUpload.lastIndexOf('.');
+      if (lastDotIdx !== -1) {
+        afterUpload = afterUpload.substring(0, lastDotIdx);
+      }
+      return afterUpload;
+    } catch {
+      return keyOrUrl;
+    }
+  }
+
+  async delete(keyOrUrl: string): Promise<void> {
+    const publicId = this.extractPublicId(keyOrUrl);
+    try {
+      const result = await cloudinary.uploader.destroy(publicId);
       if (this.logger) {
-        this.logger.info({ key, result }, '[CloudinaryStorageAdapter] File deleted');
+        this.logger.info({ publicId, keyOrUrl, result }, '[CloudinaryStorageAdapter] File deleted');
       }
     } catch (err) {
+      const error = err as Error;
       if (this.logger) {
-        this.logger.warn({ err, key }, '[CloudinaryStorageAdapter] Failed to delete file');
+        this.logger.warn({ err: error.message, publicId, keyOrUrl }, '[CloudinaryStorageAdapter] Failed to delete file');
       }
     }
   }

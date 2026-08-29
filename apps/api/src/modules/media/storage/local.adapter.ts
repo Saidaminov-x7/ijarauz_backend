@@ -86,5 +86,9 @@ export class LocalStorageAdapter implements IStorageAdapter {
       }
     }
   }
+
+  getTransformedUrl(publicIdOrUrl: string): string {
+    return publicIdOrUrl;
+  }
 }
 

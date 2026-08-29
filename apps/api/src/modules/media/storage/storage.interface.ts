@@ -30,4 +30,9 @@ export interface IStorageAdapter {
    * Удаление файла из хранилища по ключу или URL
    */
   delete(key: string): Promise<void>;
+
+  /**
+   * Строит URL с трансформацией (для Cloudinary) или возвращает исходный
+   */
+  getTransformedUrl?(publicIdOrUrl: string, opts?: { width?: number; height?: number; crop?: string }): string;
 }
