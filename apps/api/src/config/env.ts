@@ -19,8 +19,8 @@ const envSchema = z.object({
   REFRESH_SECRET: z.string().min(32, 'REFRESH_SECRET must be at least 32 characters').default('e7a2b9c4f1d8e3a5c7f2b6a9d1e4f8c2b5e7a1d3f9c4b8e2a6d1f5c7b3e9a4f2'),
   GOOGLE_CLIENT_ID: z.string().optional(),
 
-  // Telegram 2FA Bot
-  TELEGRAM_BOT_TOKEN: z.string().default('8948945605:AAEuAw2oPTRChsWJU5fyu7D53pb4gtCXpKg'),
+  // Telegram 2FA & Notification Bot
+  TELEGRAM_BOT_TOKEN: z.string().default('8919102582:AAEymMUXVkuVN6tof9UsCDWxW95vV9-2TQU'),
   TELEGRAM_ADMIN_CHAT_ID: z.string().optional(),
 
   // CORS — список доменов через запятую, например: https://ijarauz.uz,https://www.ijarauz.uz
