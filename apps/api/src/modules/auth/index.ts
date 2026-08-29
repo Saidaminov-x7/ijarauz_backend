@@ -59,8 +59,8 @@ export const authModule: FastifyPluginAsync = async (server) => {
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
   }, refreshHandler);
 
-  // Выход (требует auth)
-  server.post('/logout', { preHandler: [authMiddleware] }, logoutHandler);
+  // Выход
+  server.post('/logout', logoutHandler);
 
   // Текущий пользователь (требует auth)
   server.get('/me', { preHandler: [authMiddleware] }, meHandler);
