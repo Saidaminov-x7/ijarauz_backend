@@ -25,20 +25,39 @@ interface GoogleTokenInfo {
 }
 
 async function verifyGoogleIdToken(idToken: string): Promise<GoogleTokenInfo> {
-  const res = await fetch(
-    `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
-  );
-  if (!res.ok) {
-    throw Object.assign(new Error('Invalid Google ID token'), { statusCode: 401 });
-  }
-  const payload = (await res.json()) as GoogleTokenInfo;
-  if (config.GOOGLE_CLIENT_ID && payload.aud && payload.aud !== config.GOOGLE_CLIENT_ID) {
-    throw Object.assign(new Error('Google token audience mismatch'), { statusCode: 401 });
-  }
-  if (!payload.sub || !payload.email) {
-    throw Object.assign(new Error('Google token missing profile'), { statusCode: 401 });
-  }
-  return payload;
+  // 1. Try JWT tokeninfo endpoint
+  try {
+    const res = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+    );
+    if (res.ok) {
+      const payload = (await res.json()) as GoogleTokenInfo;
+      if (payload.sub && payload.email) {
+        return payload;
+      }
+    }
+  } catch {}
+
+  // 2. Fallback to Google OAuth userinfo endpoint (for access tokens)
+  try {
+    const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${idToken}` },
+    });
+    if (userinfoRes.ok) {
+      const data = (await userinfoRes.json()) as any;
+      if (data.sub && data.email) {
+        return {
+          sub: data.sub,
+          email: data.email,
+          email_verified: data.email_verified,
+          name: data.name,
+          picture: data.picture,
+        };
+      }
+    }
+  } catch {}
+
+  throw Object.assign(new Error('Invalid Google ID token'), { statusCode: 401 });
 }
 
 export const googleAuthHandler = async (
@@ -116,6 +135,12 @@ export const googleAuthHandler = async (
   });
 
   reply.setCookie('refreshToken', refreshToken, refreshCookieOptions());
+
+  const { logUserActivity } = await import('../../lib/activityLogger');
+  void logUserActivity(prisma, user.id, 'LOGIN', request, {
+    method: 'GOOGLE',
+    email: user.email,
+  });
 
   return reply.send({
     accessToken,

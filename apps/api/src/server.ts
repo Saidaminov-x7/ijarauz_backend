@@ -32,6 +32,7 @@ import { pagesPublicModule } from './modules/pages-public';
 import { siteSettingsPublicModule } from './modules/site-settings';
 import { savedSearchesModule } from './modules/saved-searches';
 import { viewingRequestsModule } from './modules/viewing-requests';
+import { errorReportsModule } from './modules/error-reports';
 
 // ─── Инициализация клиентов ───────────────────────────────────────────────────
 
@@ -205,6 +206,7 @@ server.register(pageSectionsModule, { prefix: '/admin/page-sections' });
 // ─── Публичные эндпоинты (без авторизации) ───────────────────────────────────
 server.register(siteSettingsPublicModule, { prefix: '/site-settings' });
 server.register(pagesPublicModule, { prefix: '/pages' });
+server.register(errorReportsModule, { prefix: '/error-reports' });
 
 // ─── Health-check эндпоинты ───────────────────────────────────────────────────
 

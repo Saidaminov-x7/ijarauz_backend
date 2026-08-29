@@ -225,6 +225,41 @@ export const adminModule: FastifyPluginAsync = async (server) => {
     }
   });
 
+  /**
+   * GET /admin/users/:id/activity — логи активности конкретного пользователя
+   */
+  server.get<{ Params: { id: string }; Querystring: { page?: string; limit?: string; action?: string } }>(
+    '/users/:id/activity',
+    { preHandler: supportHandler },
+    async (request, reply) => {
+      const page = Math.max(1, parseInt(request.query.page || '1', 10));
+      const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || '50', 10)));
+      const action = request.query.action;
+      const where: any = { userId: request.params.id };
+      if (action) where.action = action;
+
+      const [items, total] = await request.server.prisma.$transaction([
+        request.server.prisma.userActivityLog.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        request.server.prisma.userActivityLog.count({ where }),
+      ]);
+
+      return {
+        items,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit) || 1,
+        },
+      };
+    },
+  );
+
   // ─── АУДИТ-ЛОГИ ───────────────────────────────────────────────────────────────
 
   /**

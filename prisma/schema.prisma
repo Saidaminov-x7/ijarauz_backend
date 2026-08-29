@@ -134,6 +134,7 @@ model User {
   pages            Page[]
   createdSections  PageSection[] @relation("SectionCreator")
   notifications    AdminNotification[] @relation("AdminNotifications")
+  userActivityLogs UserActivityLog[]
 
   @@index([email])
   @@index([phone])
@@ -456,4 +457,36 @@ model ViewingRequest {
   @@index([listingId])
   @@index([requesterId])
   @@index([status])
+}
+
+model UserActivityLog {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String   // LOGIN, LOGOUT, REGISTER, LISTING_VIEWED, LISTING_CREATED, MESSAGE_SENT, FAVORITE_ADDED, MEDIA_UPLOADED
+  meta      Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model ClientErrorReport {
+  id        String   @id @default(uuid())
+  message   String
+  stack     String?
+  url       String
+  userAgent String?
+  userId    String?
+  severity  String   @default("error")
+  ip        String?
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([resolved])
+  @@index([createdAt])
+  @@index([severity])
 }

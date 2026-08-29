@@ -35,6 +35,12 @@ export const registerHandler = async (
       },
     }).catch(() => {});
 
+    const { logUserActivity } = await import('../../lib/activityLogger');
+    void logUserActivity(request.server.prisma, user.id, 'REGISTER', request, {
+      email: user.email,
+      name: user.name,
+    });
+
     return reply.status(201).send({
       id: user.id,
       email: user.email,

@@ -148,6 +148,13 @@ export const listingsModule: FastifyPluginAsync = async (server) => {
     const dto = createListingSchema.parse(request.body);
     const service = getService(request);
     const listing = await service.create(request.user.userId, dto);
+
+    const { logUserActivity } = await import('../../lib/activityLogger');
+    void logUserActivity(request.server.prisma, request.user.userId, 'LISTING_CREATED', request, {
+      listingId: listing.id,
+      title: listing.title,
+    });
+
     return reply.status(201).send(listing);
   });
 

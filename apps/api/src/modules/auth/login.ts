@@ -83,6 +83,11 @@ export const loginHandler = async (
   // Устанавливаем refreshToken в httpOnly cookie
   reply.setCookie('refreshToken', refreshToken, refreshCookieOptions());
 
+  const { logUserActivity } = await import('../../lib/activityLogger');
+  void logUserActivity(request.server.prisma, user.id, 'LOGIN', request, {
+    email: user.email,
+  });
+
   return reply.send({
     accessToken,
     user: {
