@@ -498,8 +498,12 @@ export class ListingsService {
     const existing = await this.prisma.listing.findUnique({ where: { id } });
     if (!existing) throw Object.assign(new Error('Listing not found'), { statusCode: 404 });
     if (existing.ownerId !== ownerId) throw Object.assign(new Error('Forbidden'), { statusCode: 403 });
+
+    if (existing.status === ListingStatus.ACTIVE) {
+      return existing; // уже опубликовано (например create() уже сделал это) — идемпотентно, не ошибка
+    }
     if (existing.status !== ListingStatus.DRAFT) {
-      throw Object.assign(new Error('Only DRAFT listings can be published'), { statusCode: 400 });
+      throw Object.assign(new Error('Только черновики можно опубликовать'), { statusCode: 400 });
     }
 
     const settings = await this.prisma.siteSettings.findUnique({ where: { id: 'singleton' } });
