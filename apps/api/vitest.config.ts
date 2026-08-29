@@ -1,5 +1,3 @@
-// apps/api/vitest.config.ts
-
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -7,6 +5,8 @@ export default defineConfig({
     environment: 'node',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.ts'],
+    exclude: ['dist/**', 'node_modules/**'],
     coverage: { reporter: ['text', 'html'] },
   },
 });
