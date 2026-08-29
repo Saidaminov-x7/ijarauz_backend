@@ -43,13 +43,18 @@ export class MediaService {
 
     // 1. Проверяем сигнатуру (magic bytes) реального содержимого
     const detected = await FileType.fromBuffer(data);
+    const isSvg = file.mimetype === 'image/svg+xml' || data.slice(0, 200).toString('utf-8').includes('<svg');
+    let mimetype: string = detected?.mime || file.mimetype || 'image/png';
     if (!detected || !ALLOWED_MIME_TYPES.includes(detected.mime as (typeof ALLOWED_MIME_TYPES)[number])) {
-      throw Object.assign(
-        new Error(`Unsupported file type: ${detected?.mime || 'unknown'}. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}`),
-        { statusCode: 415 },
-      );
+      if (isSvg) {
+        mimetype = 'image/svg+xml';
+      } else {
+        throw Object.assign(
+          new Error(`Unsupported file type: ${detected?.mime || 'unknown'}. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}`),
+          { statusCode: 415 },
+        );
+      }
     }
-    const mimetype = detected.mime;
 
     // 2. Проверяем размер
     if (data.length > config.MAX_FILE_SIZE) {

@@ -3,6 +3,7 @@
 
 import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { AdminRole } from '@prisma/client';
+import FileType from 'file-type';
 import { adminMiddleware, requireAdminRole } from '../../lib/adminMiddleware';
 import { updateListingSchema } from '../listings/schemas';
 import { AdminService } from './service';
@@ -455,21 +456,22 @@ export const adminModule: FastifyPluginAsync = async (server) => {
     }
     const buffer = Buffer.concat(chunks);
 
-    const FileType = (await import('file-type')).default;
     const detected = await FileType.fromBuffer(buffer);
     const ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'];
+    let finalMime: string = detected?.mime || data.mimetype || 'image/png';
     if (!detected || !ALLOWED.includes(detected.mime)) {
       // Разрешаем также SVG если это валидный XML/SVG
-      const isSvg = buffer.slice(0, 100).toString().includes('<svg');
+      const isSvg = buffer.slice(0, 200).toString('utf-8').includes('<svg');
       if (!isSvg) {
         return reply.status(400).send({ message: 'INVALID_FILE_TYPE: Поддерживаются только изображения (JPEG, PNG, WEBP, GIF, SVG)' });
       }
+      finalMime = 'image/svg+xml';
     }
 
     const service = getService(request);
     try {
       const result = await service.uploadSiteLogo(
-        { filename: data.filename, mimetype: data.mimetype, data: buffer },
+        { filename: data.filename, mimetype: finalMime || data.mimetype, data: buffer },
         request.user.userId,
         request.ip,
       );
