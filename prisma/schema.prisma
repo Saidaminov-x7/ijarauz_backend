@@ -153,6 +153,8 @@ model User {
   createdSections  PageSection[] @relation("SectionCreator")
   notifications    AdminNotification[] @relation("AdminNotifications")
   userActivityLogs UserActivityLog[]
+  reviewsWritten   Review[] @relation("ReviewAuthor")
+  reviewsReceived  Review[] @relation("LandlordReviews")
 
   @@index([email])
   @@index([phone])
@@ -204,6 +206,7 @@ model Listing {
   priceHistory     PriceHistory[]
   viewingRequests  ViewingRequest[]
   purchases        PromotionPurchase[]
+  reviews          Review[]
 
   @@index([ownerId])
   @@index([city])
@@ -288,6 +291,24 @@ model ChatMessage {
   @@index([senderId])
   @@index([recipientId])
   @@index([listingId])
+  @@index([createdAt])
+}
+
+model Review {
+  id         String   @id @default(uuid())
+  authorId   String
+  author     User     @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  listingId  String?
+  listing    Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  landlordId String?
+  landlord   User?    @relation("LandlordReviews", fields: [landlordId], references: [id], onDelete: Cascade)
+  rating     Int      @default(5)
+  comment    String
+  createdAt  DateTime @default(now())
+
+  @@index([authorId])
+  @@index([listingId])
+  @@index([landlordId])
   @@index([createdAt])
 }
 
