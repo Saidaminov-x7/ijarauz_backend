@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-test:
+    name: Backend Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Generate Prisma Client
+        run: pnpm prisma:generate
+      - name: Type check
+        run: pnpm --filter api type-check
+      - name: Run unit tests
+        run: pnpm --filter api test
+        env:
+          JWT_SECRET: test_secret_key_that_is_at_least_32_characters_long_12345
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test
