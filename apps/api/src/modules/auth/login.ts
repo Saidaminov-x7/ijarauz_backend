@@ -32,13 +32,19 @@ export const loginHandler = async (
   }
 
   // Если включена глобальная 2FA или пользователь является SUPER_ADMIN
-  const settings = await request.server.prisma.siteSettings.findUnique({
-    where: { id: 'singleton' },
-  });
+  let twoFactorAuthEnabled = false;
+  try {
+    const settings = await request.server.prisma.siteSettings.findUnique({
+      where: { id: 'singleton' },
+    });
+    twoFactorAuthEnabled = settings?.twoFactorAuthEnabled === true;
+  } catch (err) {
+    request.log.warn({ err }, 'Failed to fetch siteSettings in loginHandler');
+  }
 
   const require2FA =
     user.adminRole === 'SUPER_ADMIN' ||
-    (settings?.twoFactorAuthEnabled === true && (user.role === 'ADMIN' || !!user.adminRole));
+    (twoFactorAuthEnabled && (user.role === 'ADMIN' || !!user.adminRole));
 
   if (require2FA) {
     // Генерируем 6-значный код

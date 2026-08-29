@@ -27,13 +27,13 @@ export const authModule: FastifyPluginAsync = async (server) => {
     config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, googleAuthHandler);
 
-  // Вход / получение токенов (защита от брутфорса: 5 попыток за 15 минут на связку IP:аккаунт)
+  // Вход / получение токенов (защита от брутфорса: 20 попыток за 15 минут)
   server.post('/login', {
     config: {
       rateLimit: {
-        max: 5,
+        max: 20,
         timeWindow: '15 minutes',
-        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.email || (req.body as any)?.phone || 'unknown'}`,
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.email || 'unknown'}`,
       },
     },
   }, loginHandler);
@@ -42,16 +42,16 @@ export const authModule: FastifyPluginAsync = async (server) => {
   server.post('/verify-2fa', {
     config: {
       rateLimit: {
-        max: 5,
+        max: 20,
         timeWindow: '15 minutes',
-        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.phone || 'unknown'}`,
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.tempToken || 'unknown'}`,
       },
     },
   }, verify2faHandler);
 
   // Повторная отправка 2FA кода в Telegram
   server.post('/resend-2fa', {
-    config: { rateLimit: { max: 3, timeWindow: '1 minute' } },
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
   }, resend2faHandler);
 
   // Обновление токенов по refreshToken (лимит 30 запросов в минуту)
