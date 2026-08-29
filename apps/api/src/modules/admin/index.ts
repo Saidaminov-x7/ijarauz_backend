@@ -426,15 +426,27 @@ export const adminModule: FastifyPluginAsync = async (server) => {
    * PATCH /admin/site-settings — обновить настройки
    */
   server.patch('/site-settings', { preHandler: settingsHandler }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const dto = updateSiteSettingsSchema.parse(request.body);
-    const service = getService(request);
+    try {
+      const dto = updateSiteSettingsSchema.parse(request.body);
+      const service = getService(request);
 
-    const settings = await service.updateSiteSettings(dto, request.user.userId, request.ip);
+      const settings = await service.updateSiteSettings(dto, request.user.userId, request.ip);
 
-    // Инвалидируем Redis кэш публичных настроек
-    await request.server.redis.del('site:settings:public');
+      // Инвалидируем Redis кэш публичных настроек
+      try {
+        await request.server.redis.del('site:settings:public');
+      } catch (redisErr) {
+        request.log.warn({ err: redisErr }, 'Failed to clear redis cache for site:settings:public');
+      }
 
-    return settings;
+      return settings;
+    } catch (err) {
+      request.log.error({ err }, 'Error updating site settings');
+      const error = err as Error & { statusCode?: number };
+      return reply.status(error.statusCode ?? 500).send({
+        message: error.message || 'Ошибка сохранения настроек сайта',
+      });
+    }
   });
 
   /**
