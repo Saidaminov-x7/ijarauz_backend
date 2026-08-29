@@ -1103,20 +1103,33 @@ export class AdminService {
   }
 
   async updateSiteSettings(dto: UpdateSiteSettingsDto, adminId: string, ip?: string) {
+    const { navLinks, ...restDto } = dto;
+    const updateData: any = {
+      ...restDto,
+      updatedById: adminId,
+    };
+    if (navLinks !== undefined) {
+      updateData.navLinks = navLinks === null ? Prisma.DbNull : navLinks;
+    }
+
+    const createData: any = {
+      maintenanceMode: dto.maintenanceMode ?? false,
+      siteName: dto.siteName ?? 'Ijarauz',
+      contactEmail: dto.contactEmail ?? 'support@ijarauz.uz',
+      contactPhone: dto.contactPhone ?? '+998 71 200-00-00',
+      googleAuthEnabled: dto.googleAuthEnabled ?? true,
+      autoModerationEnabled: dto.autoModerationEnabled ?? false,
+      maxImagesPerListing: dto.maxImagesPerListing ?? 10,
+      updatedById: adminId,
+    };
+    if (navLinks !== undefined && navLinks !== null) {
+      createData.navLinks = navLinks;
+    }
+
     const settings = await this.prisma.siteSettings.upsert({
       where: { id: 'singleton' },
-      update: { ...dto, updatedById: adminId },
-      create: {
-        id: 'singleton',
-        maintenanceMode: dto.maintenanceMode ?? false,
-        siteName: dto.siteName ?? 'Ijarauz',
-        contactEmail: dto.contactEmail ?? 'support@ijarauz.uz',
-        contactPhone: dto.contactPhone ?? '+998 71 200-00-00',
-        googleAuthEnabled: dto.googleAuthEnabled ?? true,
-        autoModerationEnabled: dto.autoModerationEnabled ?? false,
-        maxImagesPerListing: dto.maxImagesPerListing ?? 10,
-        updatedById: adminId,
-      },
+      update: updateData,
+      create: createData,
       include: {
         updatedBy: { select: { id: true, name: true } },
       },
