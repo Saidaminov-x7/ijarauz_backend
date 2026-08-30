@@ -9,6 +9,7 @@ import { logoutHandler } from './logout';
 import { meHandler } from './me';
 import { googleAuthHandler } from './google';
 import { forgotPasswordHandler, resetPasswordHandler } from './forgot-password';
+import { exportUserDataHandler } from './export';
 import { authMiddleware } from '../../lib/authMiddleware';
 
 export const authModule: FastifyPluginAsync = async (server) => {
@@ -86,4 +87,7 @@ export const authModule: FastifyPluginAsync = async (server) => {
 
   // Текущий пользователь (требует auth)
   server.get('/me', { preHandler: [authMiddleware] }, meHandler);
+
+  // GDPR: Экспорт персональных данных пользователя
+  server.get('/me/export', { preHandler: [authMiddleware] }, exportUserDataHandler);
 };

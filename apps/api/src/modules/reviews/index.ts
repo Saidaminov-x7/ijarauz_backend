@@ -1,5 +1,5 @@
 // apps/api/src/modules/reviews/index.ts
-// Модуль отзывов об объектах и арендодателях
+// Модуль отзывов об объектах и арендодателях с поддержкой премодерации
 
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -15,7 +15,7 @@ export const reviewsModule = async (server: FastifyInstance) => {
 
   /**
    * GET /listings/:id/reviews
-   * Получить отзывы к конкретному объявлению / арендодателю
+   * Получить одобренные отзывы к конкретному объявлению / арендодателю
    */
   server.get<{ Params: { id: string } }>('/listings/:id/reviews', async (request, reply) => {
     const { id: listingId } = request.params;
@@ -35,6 +35,7 @@ export const reviewsModule = async (server: FastifyInstance) => {
           { listingId },
           { landlordId: listing.ownerId },
         ],
+        status: 'APPROVED',
       },
       orderBy: { createdAt: 'desc' },
       take: 50,
@@ -54,9 +55,9 @@ export const reviewsModule = async (server: FastifyInstance) => {
       ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1))
       : 5.0;
 
-    // Вычисляем общий рейтинг арендодателя по всем его объектам
+    // Вычисляем общий рейтинг арендодателя по всем его одобренным отзывам
     const landlordAgg = await prisma.review.aggregate({
-      where: { landlordId: listing.ownerId },
+      where: { landlordId: listing.ownerId, status: 'APPROVED' },
       _avg: { rating: true },
       _count: { id: true },
     });
@@ -85,7 +86,7 @@ export const reviewsModule = async (server: FastifyInstance) => {
 
   /**
    * POST /listings/:id/reviews
-   * Оставить отзыв к объявлению (требует авторизацию)
+   * Оставить отзыв к объявлению (требует авторизацию, отправляется на модерацию)
    */
   server.post<{ Params: { id: string }; Body: { rating: number; comment: string } }>(
     '/listings/:id/reviews',
@@ -122,6 +123,7 @@ export const reviewsModule = async (server: FastifyInstance) => {
           authorId: userId,
           rating: body.data.rating,
           comment: body.data.comment.trim(),
+          status: 'PENDING',
         },
         include: {
           author: {
@@ -134,32 +136,15 @@ export const reviewsModule = async (server: FastifyInstance) => {
         },
       });
 
-      // Пересчитываем средний рейтинг
-      const listingAgg = await prisma.review.aggregate({
-        where: {
-          OR: [
-            { listingId },
-            { landlordId: listing.ownerId },
-          ],
-        },
-        _avg: { rating: true },
-        _count: { id: true },
-      });
-
-      const updatedAverageRating = listingAgg._avg.rating
-        ? Number(listingAgg._avg.rating.toFixed(1))
-        : review.rating;
-      const updatedTotalReviews = listingAgg._count.id || 1;
-
       return reply.status(201).send({
         id: review.id,
         author: review.author.name || 'Вы (Арендатор)',
         authorAvatar: review.author.avatar,
         rating: review.rating,
         comment: review.comment,
+        status: review.status,
+        message: 'Отзыв отправлен на модерацию и будет опубликован после проверки',
         createdAt: review.createdAt.toISOString(),
-        averageRating: updatedAverageRating,
-        totalReviews: updatedTotalReviews,
       });
     },
   );
@@ -173,12 +158,12 @@ export const reviewsModule = async (server: FastifyInstance) => {
 
     const [agg, recentReviews] = await Promise.all([
       prisma.review.aggregate({
-        where: { landlordId: userId },
+        where: { landlordId: userId, status: 'APPROVED' },
         _avg: { rating: true },
         _count: { id: true },
       }),
       prisma.review.findMany({
-        where: { landlordId: userId },
+        where: { landlordId: userId, status: 'APPROVED' },
         orderBy: { createdAt: 'desc' },
         take: 10,
         include: {
@@ -207,3 +192,4 @@ export const reviewsModule = async (server: FastifyInstance) => {
     });
   });
 };
+

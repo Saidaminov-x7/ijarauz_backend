@@ -134,6 +134,10 @@ model User {
   blockedAt        DateTime?                    // Дата блокировки
   blockedReason    String?                      // Причина блокировки
   refreshTokenHash String?
+  twoFactorSecret  String?                      // TOTP / 2FA секрет
+  twoFactorEnabled Boolean     @default(false)  // Включен ли 2FA
+  isDeleted        Boolean     @default(false)  // Soft-delete флаг
+  deletedAt        DateTime?                    // Дата мягкого удаления
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 
@@ -155,12 +159,14 @@ model User {
   userActivityLogs UserActivityLog[]
   reviewsWritten   Review[] @relation("ReviewAuthor")
   reviewsReceived  Review[] @relation("LandlordReviews")
+  promoCodeUsages  PromoCodeUsage[]
 
   @@index([email])
   @@index([phone])
   @@index([role])
   @@index([adminRole])
   @@index([isBlocked])
+  @@index([isDeleted])
 }
 
 model Listing {
@@ -186,6 +192,8 @@ model Listing {
   moderationStatus ModerationStatus @default(PENDING) // Статус модерации
   moderationNote   String?          // Комментарий/причина при модерации
   viewsCount       Int              @default(0)
+  isDeleted        Boolean          @default(false)  // Soft-delete флаг
+  deletedAt        DateTime?                         // Дата мягкого удаления
 
   // Продвижение и VIP
   isPromoted       Boolean          @default(false)
@@ -218,6 +226,7 @@ model Listing {
   @@index([type])
   @@index([isPromoted, promotedUntil])
   @@index([isVerified])
+  @@index([isDeleted])
   @@index([createdAt])
   @@index([viewsCount])
   @@index([city, district, type, status, price])
@@ -295,20 +304,24 @@ model ChatMessage {
 }
 
 model Review {
-  id         String   @id @default(uuid())
-  authorId   String
-  author     User     @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
-  listingId  String?
-  listing    Listing? @relation(fields: [listingId], references: [id], onDelete: Cascade)
-  landlordId String?
-  landlord   User?    @relation("LandlordReviews", fields: [landlordId], references: [id], onDelete: Cascade)
-  rating     Int      @default(5)
-  comment    String
-  createdAt  DateTime @default(now())
+  id           String           @id @default(uuid())
+  authorId     String
+  author       User             @relation("ReviewAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  listingId    String?
+  listing      Listing?         @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  landlordId   String?
+  landlord     User?            @relation("LandlordReviews", fields: [landlordId], references: [id], onDelete: Cascade)
+  rating       Int              @default(5)
+  comment      String
+  status       ModerationStatus @default(PENDING)
+  moderatedAt  DateTime?
+  moderatedBy  String?
+  createdAt    DateTime         @default(now())
 
   @@index([authorId])
   @@index([listingId])
   @@index([landlordId])
+  @@index([status])
   @@index([createdAt])
 }
 
@@ -570,18 +583,32 @@ model ClientErrorReport {
 }
 
 model PromoCode {
-  id              String    @id @default(uuid())
-  code            String    @unique
-  discountPercent Int       @default(10)
-  maxUses         Int       @default(100)
-  usedCount       Int       @default(0)
-  isActive        Boolean   @default(true)
+  id              String           @id @default(uuid())
+  code            String           @unique
+  discountPercent Int              @default(10)
+  maxUses         Int              @default(100)
+  usedCount       Int              @default(0)
+  isActive        Boolean          @default(true)
   expiresAt       DateTime?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  usages          PromoCodeUsage[]
 
   @@index([code])
   @@index([isActive])
+}
+
+model PromoCodeUsage {
+  id          String    @id @default(uuid())
+  promoCodeId String
+  promoCode   PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  usedAt      DateTime  @default(now())
+
+  @@unique([promoCodeId, userId])
+  @@index([userId])
+  @@index([promoCodeId])
 }
 
 model SearchQueryLog {
@@ -604,16 +631,37 @@ model SearchQueryLog {
 }
 
 model SystemWebhook {
-  id        String   @id @default(uuid())
-  name      String
-  url       String
-  events    String[] // e.g. ["FRAUD_DETECTED", "REPORT_CREATED", "SYSTEM_ERROR", "PAYMENT_RECEIVED"]
-  isActive  Boolean  @default(true)
-  secret    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String            @id @default(uuid())
+  name        String
+  url         String
+  events      String[] // e.g. ["FRAUD_DETECTED", "REPORT_CREATED", "SYSTEM_ERROR", "PAYMENT_RECEIVED"]
+  isActive    Boolean           @default(true)
+  secret      String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  deliveries  WebhookDelivery[]
 
   @@index([isActive])
+}
+
+model WebhookDelivery {
+  id           String        @id @default(uuid())
+  webhookId    String
+  webhook      SystemWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  event        String
+  payload      Json
+  attempts     Int           @default(0)
+  maxAttempts  Int           @default(5)
+  nextRetryAt  DateTime?
+  status       String        @default("PENDING") // PENDING, SUCCESS, FAILED
+  responseCode Int?
+  lastError    String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([webhookId])
+  @@index([status])
+  @@index([nextRetryAt])
 }
 
 model BackupSnapshot {

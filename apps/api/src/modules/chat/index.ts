@@ -268,6 +268,30 @@ export const chatModule = async (server: FastifyInstance) => {
         },
       });
 
+  /**
+   * DELETE /chat/messages/:id
+   * Удалить сообщение (только автор)
+   */
+  server.delete<{ Params: { id: string } }>(
+    '/messages/:id',
+    { preHandler: [authMiddleware] },
+    async (request, reply) => {
+      const userId = request.user.userId;
+      const { id } = request.params;
+
+      const msg = await prisma.chatMessage.findUnique({
+        where: { id },
+      });
+
+      if (!msg) {
+        return reply.status(404).send({ message: 'Сообщение не найдено' });
+      }
+
+      if (msg.senderId !== userId) {
+        return reply.status(403).send({ message: 'Вы можете удалять только свои сообщения' });
+      }
+
+      await prisma.chatMessage.delete({ where: { id } });
       return reply.send({ success: true });
     },
   );

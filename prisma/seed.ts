@@ -180,6 +180,120 @@ async function main() {
     console.log(`Skipping PageSections creation (${existingSectionsCount} sections already exist).`);
   }
 
+  // ─── 4. Начальные промокоды (если не созданы) ─────────────────────────────────
+  console.log('Ensuring initial Promo Codes exist...');
+  await prisma.promoCode.upsert({
+    where: { code: 'WELCOME10' },
+    update: {},
+    create: {
+      code: 'WELCOME10',
+      discountPercent: 10,
+      maxUses: 1000,
+      isActive: true,
+    },
+  });
+
+  await prisma.promoCode.upsert({
+    where: { code: 'VIP20' },
+    update: {},
+    create: {
+      code: 'VIP20',
+      discountPercent: 20,
+      maxUses: 500,
+      isActive: true,
+    },
+  });
+
+  // ─── 5. Начальный арендодатель и объявления (если база пустая) ───────────────
+  const existingListingsCount = await prisma.listing.count();
+  if (existingListingsCount === 0) {
+    console.log('Creating sample verified landlord and initial active listings...');
+
+    const landlord = await prisma.user.upsert({
+      where: { email: 'landlord@ijarauz.uz' },
+      update: {},
+      create: {
+        email: 'landlord@ijarauz.uz',
+        phone: '+998901234567',
+        passwordHash: superAdminPasswordHash,
+        name: 'Алишер Усманов',
+        role: Role.LANDLORD,
+        verified: true,
+      },
+    });
+
+    const sampleListings = [
+      {
+        title: 'Светлая 2-комнатная квартира в центре',
+        description: 'Отличная квартира с новым ремонтом, всей мебелью и бытовой техникой. В 5 минутах от метро Ойбек. Идеально для семьи.',
+        price: 550,
+        type: 'APARTMENT' as const,
+        rooms: 2,
+        area: 65,
+        floor: 4,
+        totalFloors: 9,
+        lat: 41.3005,
+        lng: 69.2785,
+        city: 'Ташкент',
+        district: 'Мирабадский район',
+        address: 'ул. Афросиаб, д. 12',
+        status: 'ACTIVE' as const,
+        moderationStatus: 'APPROVED' as const,
+        isVerified: true,
+        isPromoted: true,
+        promotionTier: 'TOP' as const,
+        ownerId: landlord.id,
+      },
+      {
+        title: 'Уютная студия возле метро Новза',
+        description: 'Современная студия со всеми удобствами: кондиционер, стиральная машина, Wi-Fi. Чистый подъезд, тихий двор.',
+        price: 380,
+        type: 'APARTMENT' as const,
+        rooms: 1,
+        area: 42,
+        floor: 3,
+        totalFloors: 5,
+        lat: 41.2855,
+        lng: 69.2155,
+        city: 'Ташкент',
+        district: 'Чиланзарский район',
+        address: 'проспект Бунёдкор, д. 45',
+        status: 'ACTIVE' as const,
+        moderationStatus: 'APPROVED' as const,
+        isVerified: true,
+        isPromoted: false,
+        ownerId: landlord.id,
+      },
+      {
+        title: 'Просторный дом в Самарканде',
+        description: 'Большой благоустроенный дом с садом и гаражом. Все коммуникации подключены, тихий престижный район.',
+        price: 700,
+        type: 'HOUSE' as const,
+        rooms: 4,
+        area: 160,
+        floor: 1,
+        totalFloors: 2,
+        lat: 39.6542,
+        lng: 66.9597,
+        city: 'Самарканд',
+        district: 'Центральный район',
+        address: 'ул. Регистан, д. 8',
+        status: 'ACTIVE' as const,
+        moderationStatus: 'APPROVED' as const,
+        isVerified: true,
+        isPromoted: true,
+        promotionTier: 'URGENT' as const,
+        ownerId: landlord.id,
+      },
+    ];
+
+    for (const listing of sampleListings) {
+      await prisma.listing.create({
+        data: listing,
+      });
+    }
+  }
+
   console.log('✅ Safe Seed completed successfully!');
   console.log('');
   console.log('--- Аккаунт администратора ---');

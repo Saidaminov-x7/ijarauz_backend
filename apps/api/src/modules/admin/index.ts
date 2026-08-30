@@ -885,6 +885,51 @@ export const adminModule: FastifyPluginAsync = async (server) => {
     return { success: true };
   });
 
+  server.post<{ Params: { id: string } }>('/webhooks/:id/test', { preHandler: settingsHandler }, async (request, reply) => {
+    const webhook = await request.server.prisma.systemWebhook.findUnique({ where: { id: request.params.id } });
+    if (!webhook) {
+      return reply.status(404).send({ message: 'Вебхук не найден' });
+    }
+
+    const { sendWebhookRequest } = await import('../../lib/webhookDelivery');
+    const testPayload = {
+      event: 'SYSTEM_TEST_PING',
+      timestamp: new Date().toISOString(),
+      data: {
+        message: 'Тестовое уведомление из панели управления Ijarauz',
+        adminUserId: (request as any).user?.userId,
+      },
+    };
+
+    const delivery = await request.server.prisma.webhookDelivery.create({
+      data: {
+        webhookId: webhook.id,
+        event: 'SYSTEM_TEST_PING',
+        payload: testPayload,
+        attempts: 1,
+        status: 'PENDING',
+      },
+    });
+
+    const res = await sendWebhookRequest(webhook.url, testPayload, webhook.secret);
+
+    await request.server.prisma.webhookDelivery.update({
+      where: { id: delivery.id },
+      data: {
+        status: res.success ? 'SUCCESS' : 'FAILED',
+        responseCode: res.statusCode || null,
+        lastError: res.error || null,
+      },
+    });
+
+    return reply.send({
+      success: res.success,
+      statusCode: res.statusCode,
+      error: res.error,
+      deliveryId: delivery.id,
+    });
+  });
+
   // ─── [ФИЧА 29] BACKUPS & SNAPSHOTS ──────────────────────────────────────────
   server.get('/system/backups', { preHandler: settingsHandler }, async (request, reply) => {
     const [listingsCount, usersCount, reportsCount, lastSnapshot] = await Promise.all([
@@ -1028,5 +1073,216 @@ export const adminModule: FastifyPluginAsync = async (server) => {
 
     return [];
   });
+
+  // ─── [ФИЧА: МОДЕРАЦИЯ ОТЗЫВОВ] ──────────────────────────────────────────────
+  server.get('/reviews/pending', { preHandler: supportHandler }, async (request, reply) => {
+    return request.server.prisma.review.findMany({
+      where: { status: 'PENDING' },
+      include: {
+        author: { select: { id: true, name: true, email: true, phone: true, avatar: true } },
+        listing: { select: { id: true, title: true, city: true, price: true } },
+        landlord: { select: { id: true, name: true, phone: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+  });
+
+  server.patch<{ Params: { id: string }; Body: { status: 'APPROVED' | 'REJECTED' } }>(
+    '/reviews/:id/status',
+    { preHandler: listingActionHandler },
+    async (request, reply) => {
+      const { id } = request.params;
+      const { status } = request.body;
+      const adminId = (request as any).user?.userId || null;
+
+      if (!['APPROVED', 'REJECTED'].includes(status)) {
+        return reply.status(400).send({ message: 'Некорректный статус отзыва' });
+      }
+
+      const review = await request.server.prisma.review.update({
+        where: { id },
+        data: {
+          status: status as any,
+          moderatedAt: new Date(),
+          moderatedBy: adminId,
+        },
+      });
+
+      return reply.send(review);
+    },
+  );
+
+  // ─── [ФИЧА: SOFT-DELETE И КОРЗИНА ВОССТАНОВЛЕНИЯ (30 ДНЕЙ)] ──────────────────
+  server.get('/trash', { preHandler: supportHandler }, async (request, reply) => {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [deletedListings, deletedUsers] = await Promise.all([
+      request.server.prisma.listing.findMany({
+        where: { isDeleted: true, deletedAt: { gte: thirtyDaysAgo } },
+        include: { owner: { select: { id: true, name: true, email: true } } },
+        orderBy: { deletedAt: 'desc' },
+        take: 50,
+      }),
+      request.server.prisma.user.findMany({
+        where: { isDeleted: true, deletedAt: { gte: thirtyDaysAgo } },
+        select: { id: true, name: true, email: true, phone: true, role: true, deletedAt: true },
+        orderBy: { deletedAt: 'desc' },
+        take: 50,
+      }),
+    ]);
+
+    return reply.send({ listings: deletedListings, users: deletedUsers });
+  });
+
+  server.post<{ Params: { id: string } }>('/listings/:id/restore', { preHandler: listingActionHandler }, async (request, reply) => {
+    const { id } = request.params;
+    const restored = await request.server.prisma.listing.update({
+      where: { id },
+      data: { isDeleted: false, deletedAt: null, status: 'DRAFT' },
+    });
+    return reply.send({ success: true, listing: restored });
+  });
+
+  server.post<{ Params: { id: string } }>('/users/:id/restore', { preHandler: userActionHandler }, async (request, reply) => {
+    const { id } = request.params;
+    const restored = await request.server.prisma.user.update({
+      where: { id },
+      data: { isDeleted: false, deletedAt: null },
+    });
+    return reply.send({ success: true, user: restored });
+  });
+
+  // ─── [ФИЧА: ПРОСМОТР ВСЕХ ЧАТОВ И ВСЕХ ОБЪЯВЛЕНИЙ ПОЛЬЗОВАТЕЛЯ ИЗ АДМИНКИ] ───
+  server.get<{ Params: { id: string } }>('/users/:id/all-listings', { preHandler: userActionHandler }, async (request, reply) => {
+    const { id } = request.params;
+    const listings = await request.server.prisma.listing.findMany({
+      where: { ownerId: id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        images: { select: { url: true } },
+      },
+    });
+    return reply.send({ listings });
+  });
+
+  server.get<{ Params: { id: string } }>('/users/:id/all-chats', { preHandler: userActionHandler }, async (request, reply) => {
+    const { id } = request.params;
+    const messages = await request.server.prisma.chatMessage.findMany({
+      where: {
+        OR: [{ senderId: id }, { recipientId: id }],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      include: {
+        sender: { select: { id: true, name: true, email: true, phone: true, avatar: true } },
+        recipient: { select: { id: true, name: true, email: true, phone: true, avatar: true } },
+        listing: { select: { id: true, title: true, price: true, city: true } },
+      },
+    });
+    return reply.send({ messages });
+  });
+
+  // ─── [ФИЧА: AI-АНАЛИЗАТОР ЖАЛОБЫ И ИСТОРИИ ЧАТОВ] ───────────────────────────
+  server.get<{ Params: { id: string } }>('/reports/:id/ai-analyze', { preHandler: listingActionHandler }, async (request, reply) => {
+    const { id } = request.params;
+    const report = await request.server.prisma.listingReport.findUnique({
+      where: { id },
+      include: {
+        listing: {
+          include: {
+            owner: { select: { id: true, name: true, email: true, phone: true, createdAt: true, isBlocked: true } },
+            images: { select: { url: true } },
+          },
+        },
+        reporter: { select: { id: true, name: true, email: true, phone: true, createdAt: true } },
+      },
+    });
+
+    if (!report) {
+      return reply.status(404).send({ message: 'Жалоба не найдена' });
+    }
+
+    // Извлекаем переписку между заявителем и собственником объекта, если оба есть
+    let chatHistory: any[] = [];
+    if (report.reporterId && report.listing?.ownerId) {
+      chatHistory = await request.server.prisma.chatMessage.findMany({
+        where: {
+          OR: [
+            { senderId: report.reporterId, recipientId: report.listing.ownerId },
+            { senderId: report.listing.ownerId, recipientId: report.reporterId },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+        take: 50,
+      });
+    }
+
+    // AI-анализ жалобы и диалогов
+    const isScamReason = ['SCAM', 'WRONG_PRICE', 'WRONG_PHOTOS'].includes(report.reason);
+    const messagesCount = chatHistory.length;
+    const combinedChatText = chatHistory.map((m) => m.message.toLowerCase()).join(' ');
+
+    const prepaymentKeywords = ['предоплат', 'залог на карту', 'переведи', 'карта', 'click', 'payme', 'avans', 'аванс', 'перевод', 'card'];
+    const hasPrepaymentTalk = prepaymentKeywords.some((kw) => combinedChatText.includes(kw));
+
+    let riskScore = 20;
+    const flags: string[] = [];
+
+    if (isScamReason) {
+      riskScore += 35;
+      flags.push(`Причина жалобы критическая: ${report.reason}`);
+    }
+
+    if (report.listing?.owner?.isBlocked) {
+      riskScore += 30;
+      flags.push('Автор объявления уже был ранее заблокирован');
+    }
+
+    if (hasPrepaymentTalk) {
+      riskScore += 35;
+      flags.push('Обнаружено требование предоплаты/перевода на карту в переписке');
+    }
+
+    if (report.comment && report.comment.length > 5) {
+      flags.push(`Комментарий заявителя: "${report.comment}"`);
+    }
+
+    riskScore = Math.min(100, riskScore);
+
+    const verdict = riskScore >= 70 ? 'HIGH_RISK_FRAUD' : riskScore >= 40 ? 'SUSPICIOUS' : 'LOW_RISK';
+    const recommendation =
+      verdict === 'HIGH_RISK_FRAUD'
+        ? 'Рекомендуется немедленно заблокировать объявление и аккаунт собственника, так как обнаружены явные признаки скама/вымогательства предоплаты.'
+        : verdict === 'SUSPICIOUS'
+        ? 'Рекомендуется запросить подтверждающие документы на собственность или перепроверить фотографии.'
+        : 'Критических нарушений в переписке не выявлено. Возможна ложная или неактуальная жалоба.';
+
+    return reply.send({
+      reportId: report.id,
+      reason: report.reason,
+      reporterComment: report.comment,
+      riskScore,
+      verdict,
+      flags,
+      recommendation,
+      chatMessagesAnalyzed: messagesCount,
+      chatHistory: chatHistory.map((m) => ({
+        id: m.id,
+        isFromOwner: m.senderId === report.listing?.ownerId,
+        text: m.message,
+        time: m.createdAt,
+      })),
+      listingSummary: {
+        id: report.listing?.id,
+        title: report.listing?.title,
+        price: report.listing?.price,
+        city: report.listing?.city,
+        owner: report.listing?.owner,
+        images: report.listing?.images?.map((img) => img.url) || [],
+      },
+    });
+  });
 };
+
 

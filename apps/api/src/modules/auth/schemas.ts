@@ -3,10 +3,21 @@
 import { z } from 'zod';
 import { Role } from '@prisma/client';
 
+export const passwordStrengthRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]{8,100}$/;
+
+export const passwordValidation = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .max(100)
+  .regex(
+    passwordStrengthRegex,
+    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+  );
+
 export const registerSchema = z.object({
   email: z.string().email('Invalid email address').max(255),
   phone: z.string().regex(/^\+?[0-9\s-]{10,20}$/, 'Invalid phone number format'),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+  password: passwordValidation,
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
   // Запрещаем прямую регистрацию с ролью ADMIN через публичный эндпоинт
   role: z.enum([Role.USER, Role.LANDLORD]).default(Role.USER),
@@ -49,7 +60,7 @@ export type ForgotPasswordDto = z.infer<typeof forgotPasswordSchema>;
 
 export const resetPasswordSchema = z.object({
   token: z.string().min(10, 'Invalid or expired token'),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+  password: passwordValidation,
 });
 
 export type ResetPasswordDto = z.infer<typeof resetPasswordSchema>;

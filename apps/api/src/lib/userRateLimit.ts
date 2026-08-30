@@ -8,12 +8,11 @@ export function createUserRateLimit(
   opts: { keyPrefix: string; max: number; windowSec: number },
 ) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    const userId = request.user?.userId;
-    if (!userId) return; // authMiddleware уже должен был отсечь неавторизованных
+    const identifier = (request as any).user?.userId || request.ip || 'anonymous';
     const redis = getRedis(request);
     if (!redis) return;
 
-    const key = `ratelimit:${opts.keyPrefix}:${userId}`;
+    const key = `ratelimit:${opts.keyPrefix}:${identifier}`;
     try {
       const count = await redis.incr(key);
       if (count === 1) {
@@ -21,6 +20,8 @@ export function createUserRateLimit(
       }
       if (count > opts.max) {
         return reply.status(429).send({
+          statusCode: 429,
+          error: 'Too Many Requests',
           message: `Слишком много запросов. Попробуйте через ${opts.windowSec} секунд.`,
         });
       }
@@ -29,3 +30,4 @@ export function createUserRateLimit(
     }
   };
 }
+

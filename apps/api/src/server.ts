@@ -243,6 +243,46 @@ server.get('/health/live', {
   schema: { tags: ['Health'] },
 }, async () => ({ status: 'live', timestamp: new Date().toISOString() }));
 
+server.get('/health/ai', {
+  schema: { tags: ['Health'] },
+}, async (_req, reply) => {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${config.OLLAMA_BASE_URL}/api/tags`, {
+      method: 'GET',
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+
+    if (res.ok) {
+      const data: any = await res.json().catch(() => ({}));
+      return reply.send({
+        status: 'up',
+        service: 'ollama',
+        url: config.OLLAMA_BASE_URL,
+        model: config.OLLAMA_MODEL,
+        models: data.models?.map((m: any) => m.name) || [],
+        timestamp: new Date().toISOString(),
+      });
+    }
+    return reply.status(503).send({
+      status: 'down',
+      service: 'ollama',
+      url: config.OLLAMA_BASE_URL,
+      statusCode: res.status,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err: any) {
+    return reply.status(503).send({
+      status: 'down',
+      service: 'ollama',
+      url: config.OLLAMA_BASE_URL,
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 server.get('/health/ready', {
   schema: { tags: ['Health'] },
 }, async (_req, reply) => {
@@ -274,6 +314,19 @@ server.get('/health/ready', {
     } catch {
       checks.cloudinary = false;
     }
+  }
+
+  // AI Health Check
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    const aiRes = await fetch(`${config.OLLAMA_BASE_URL}/api/tags`, {
+      method: 'GET',
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeout));
+    checks.aiService = aiRes.ok;
+  } catch {
+    checks.aiService = false;
   }
 
   const allHealthy = Object.values(checks).every(Boolean);
@@ -364,11 +417,13 @@ server.setNotFoundHandler((request, reply) => {
 import { startTelegramBot, stopTelegramBot } from './lib/telegram';
 import { expirePromotions } from './lib/jobs/expire-promotions';
 import { runScheduledBackup } from './lib/jobs/scheduled-backup';
+import { retryPendingWebhookDeliveries } from './lib/webhookDelivery';
 
 // ─── Запуск и Graceful Shutdown ───────────────────────────────────────────────
 
 let promotionsInterval: NodeJS.Timeout | null = null;
 let scheduledBackupInterval: NodeJS.Timeout | null = null;
+let webhookRetryInterval: NodeJS.Timeout | null = null;
 
 const start = async () => {
   try {
@@ -401,6 +456,13 @@ const start = async () => {
         server.log.error({ err }, '[Backup] Error in runScheduledBackup interval');
       });
     }, 24 * 60 * 60 * 1000);
+
+    // Периодический воркер повторной доставки вебхуков (каждые 60 секунд)
+    webhookRetryInterval = setInterval(() => {
+      retryPendingWebhookDeliveries(prisma, server.log).catch((err) => {
+        server.log.error({ err }, '[Webhook] Error in retryPendingWebhookDeliveries');
+      });
+    }, 60 * 1000);
 
     // Предупреждение о включённых флагах Категории 2 (без полной бэкенд-интеграции)
     try {
@@ -444,6 +506,9 @@ const shutdown = async (signal: string) => {
     }
     if (scheduledBackupInterval) {
       clearInterval(scheduledBackupInterval);
+    }
+    if (webhookRetryInterval) {
+      clearInterval(webhookRetryInterval);
     }
     stopTelegramBot();
     await server.close();
