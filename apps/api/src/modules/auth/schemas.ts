@@ -8,11 +8,7 @@ export const passwordStrengthRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%
 export const passwordValidation = z
   .string()
   .min(8, 'Password must be at least 8 characters')
-  .max(100)
-  .regex(
-    passwordStrengthRegex,
-    'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
-  );
+  .max(100);
 
 export const registerSchema = z.object({
   email: z.string().email('Invalid email address').max(255),
