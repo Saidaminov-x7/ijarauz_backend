@@ -1204,9 +1204,72 @@ export class AdminService {
     return settings;
   }
 
+  // ─── Тема ПАНЕЛИ АДМИНИСТРАТОРА (AdminThemeSettings) ─────────────────────────
+
+  private static readonly DEFAULT_ADMIN_THEME = {
+    id: 'singleton',
+    primaryColor: '#2563eb',
+    secondaryColor: '#1d4ed8',
+    backgroundColor: '#0f0f0f',
+    textColor: '#f1f5f9',
+    borderRadius: '0.5rem',
+    fontFamily: 'Inter, sans-serif',
+  };
+
+  /**
+   * Получить текущие дизайн-токены панели администратора
+   */
+  async getAdminThemeSettings() {
+    return this.prisma.adminThemeSettings.upsert({
+      where: { id: 'singleton' },
+      update: {},
+      create: { ...AdminService.DEFAULT_ADMIN_THEME },
+    });
+  }
+
+  /**
+   * Обновить дизайн-токены панели администратора
+   */
+  async updateAdminThemeSettings(dto: {
+    primaryColor?: string;
+    secondaryColor?: string;
+    backgroundColor?: string;
+    textColor?: string;
+    borderRadius?: string;
+    fontFamily?: string;
+  }, adminId: string, ip?: string) {
+    const defaults = AdminService.DEFAULT_ADMIN_THEME;
+    const settings = await this.prisma.adminThemeSettings.upsert({
+      where: { id: 'singleton' },
+      update: { ...dto, updatedById: adminId },
+      create: {
+        id: 'singleton',
+        primaryColor: dto.primaryColor ?? defaults.primaryColor,
+        secondaryColor: dto.secondaryColor ?? defaults.secondaryColor,
+        backgroundColor: dto.backgroundColor ?? defaults.backgroundColor,
+        textColor: dto.textColor ?? defaults.textColor,
+        borderRadius: dto.borderRadius ?? defaults.borderRadius,
+        fontFamily: dto.fontFamily ?? defaults.fontFamily,
+        updatedById: adminId,
+      },
+    });
+
+    await this.log({
+      adminId,
+      action: 'ADMIN_THEME_SETTINGS_UPDATED',
+      resource: 'admin_theme',
+      meta: dto,
+      ip,
+      userAgent: 'admin-panel',
+    });
+
+    return settings;
+  }
+
   /**
    * Загрузить логотип сайта
    */
+
   async uploadSiteLogo(file: { filename: string; mimetype: string; data: Buffer }, adminId: string, ip?: string) {
     // Получаем текущий логотип для возможной очистки старого
     const currentSettings = await this.prisma.siteSettings.findUnique({

@@ -1,5 +1,5 @@
 // apps/api/src/modules/admin/theme.ts
-// Управление дизайн-токенами темы сайта
+// Управление дизайн-токенами: тема сайта + тема панели администратора
 
 import { FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
@@ -18,8 +18,10 @@ const updateThemeSchema = z.object({
 export const themeModule: FastifyPluginAsync = async (server) => {
   const getService = (req: FastifyRequest) => new AdminService(req.server.prisma);
 
+  // ─── ТЕМА САЙТА ──────────────────────────────────────────────────────────────
+
   /**
-   * GET /admin/theme — получить текущие дизайн-токены
+   * GET /admin/theme — получить текущие дизайн-токены САЙТА
    */
   server.get('/theme', { preHandler: [requireAdminRole('SUPER_ADMIN')] }, async (request: FastifyRequest) => {
     const service = getService(request);
@@ -27,7 +29,7 @@ export const themeModule: FastifyPluginAsync = async (server) => {
   });
 
   /**
-   * PATCH /admin/theme — обновить дизайн-токены
+   * PATCH /admin/theme — обновить дизайн-токены САЙТА
    */
   server.patch('/theme', { preHandler: [requireAdminRole('SUPER_ADMIN')] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const dto = updateThemeSchema.parse(request.body);
@@ -37,4 +39,29 @@ export const themeModule: FastifyPluginAsync = async (server) => {
     await request.server.redis.del('site:theme:public').catch(() => {});
     return settings;
   });
-};
+
+  // ─── ТЕМА ПАНЕЛИ АДМИНИСТРАТОРА ──────────────────────────────────────────────
+
+  /**
+   * GET /admin/admin-theme — получить текущие дизайн-токены ПАНЕЛИ АДМИНИСТРАТОРА
+   * Только для SUPER_ADMIN, НЕ публичный эндпоинт
+   */
+  server.get('/admin-theme', { preHandler: [requireAdminRole('SUPER_ADMIN')] }, async (request: FastifyRequest) => {
+    const service = getService(request);
+    return service.getAdminThemeSettings();
+  });
+
+  /**
+   * PATCH /admin/admin-theme — обновить дизайн-токены ПАНЕЛИ АДМИНИСТРАТОРА
+   * Только для SUPER_ADMIN, НЕ публичный эндпоинт
+   */
+  server.patch('/admin-theme', { preHandler: [requireAdminRole('SUPER_ADMIN')] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const parsed = updateThemeSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.status(400).send({ message: 'Invalid theme data', errors: parsed.error.flatten() });
+    }
+    const service = getService(request);
+    const settings = await service.updateAdminThemeSettings(parsed.data, request.user.userId, request.ip);
+    return settings;
+  });
+};

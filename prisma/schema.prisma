@@ -420,6 +420,19 @@ model SiteSettings {
   updatedBy             User?    @relation("SiteSettingsUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 }
 
+/// Дизайн-токены для темы самой ПАНЕЛИ АДМИНИСТРАТОРА (независимо от темы сайта)
+model AdminThemeSettings {
+  id              String   @id @default("singleton")
+  primaryColor    String   @default("#2563eb")
+  secondaryColor  String   @default("#1d4ed8")
+  backgroundColor String   @default("#0f0f0f")
+  textColor       String   @default("#f1f5f9")
+  borderRadius    String   @default("0.5rem")
+  fontFamily      String   @default("Inter, sans-serif")
+  updatedById     String?
+  updatedAt       DateTime @updatedAt
+}
+
 /// Дизайн-токены для темы сайта
 model ThemeSettings {
   id            String   @id @default("singleton")
