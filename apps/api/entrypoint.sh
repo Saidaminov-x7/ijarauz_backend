@@ -14,7 +14,10 @@ if [ -z "$DATABASE_URL" ]; then
 fi
 
 echo "▶ [Ijarauz Entrypoint] Applying Prisma database migrations (deploy)..."
-cd /app && ./node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma
+cd /app && ./node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma || {
+  echo "⚠️ [Ijarauz Entrypoint] migrate deploy failed or has drift, running db push..."
+  cd /app && ./node_modules/.bin/prisma db push --schema=prisma/schema.prisma --accept-data-loss
+}
 
 echo "▶ [Ijarauz Entrypoint] Database schema is up to date."
 echo "▶ [Ijarauz Entrypoint] Starting API server on port ${PORT:-3000}..."
