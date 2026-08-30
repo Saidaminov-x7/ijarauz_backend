@@ -38,6 +38,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         navLinks: true,
         yandexMetrikaId: true,
         yandexMetrikaEnabled: true,
+        mobilePinchZoomEnabled: true,
       },
     });
 
@@ -58,6 +59,7 @@ export const siteSettingsPublicModule: FastifyPluginAsync = async (server) => {
         navLinks: null,
         yandexMetrikaId: '112059980',
         yandexMetrikaEnabled: true,
+        mobilePinchZoomEnabled: true,
       };
     }
 

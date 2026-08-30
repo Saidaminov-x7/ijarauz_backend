@@ -414,6 +414,7 @@ model SiteSettings {
   yandexMetrikaEnabled  Boolean  @default(true) // Включить/выключить Яндекс.Метрику
   maintenanceBypassPassword String? // Пароль для обхода режима техобслуживания
   maintenancePasswordEnabled Boolean @default(false) // Требовать пароль при техобслуживании
+  mobilePinchZoomEnabled Boolean  @default(true)  // Масштабирование двумя пальцами на смартфонах
 
   updatedAt             DateTime @updatedAt
   updatedById           String?

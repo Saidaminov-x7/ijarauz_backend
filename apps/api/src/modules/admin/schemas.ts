@@ -119,6 +119,7 @@ export const updateSiteSettingsSchema = z.object({
   ).optional().nullable(),
   maintenancePasswordEnabled: z.boolean().optional(),
   maintenanceBypassPassword: z.string().max(100).optional().nullable(),
+  mobilePinchZoomEnabled: z.boolean().optional(),
 });
 
 export type UpdateSiteSettingsDto = z.infer<typeof updateSiteSettingsSchema>;
