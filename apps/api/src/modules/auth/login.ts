@@ -67,7 +67,7 @@ export const loginHandler = async (
       }
 
       // Отправляем код в Telegram Bot
-      let tgResult = { success: false, message: '' };
+      let tgResult: { success: boolean; message?: string } = { success: false, message: '' };
       try {
         tgResult = await sendTelegram2FACode(
           request.server.redis,
