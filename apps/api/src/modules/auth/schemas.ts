@@ -42,6 +42,7 @@ export type Resend2faDto = z.infer<typeof resend2faSchema>;
 
 export const forgotPasswordSchema = z.object({
   email: z.string().email('Invalid email address').max(255),
+  locale: z.enum(['ru', 'uz', 'en']).optional().default('ru'),
 });
 
 export type ForgotPasswordDto = z.infer<typeof forgotPasswordSchema>;

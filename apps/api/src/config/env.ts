@@ -23,6 +23,9 @@ const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ADMIN_CHAT_ID: z.string().optional(),
 
+  // Public Site URL (for reset links, verification links etc)
+  PUBLIC_SITE_URL: z.string().url('PUBLIC_SITE_URL must be a valid URL').default('https://ijarauz.uz'),
+
   // CORS — список доменов через запятую, например: https://ijarauz.uz,https://www.ijarauz.uz
   CORS_ORIGINS: z
     .string()

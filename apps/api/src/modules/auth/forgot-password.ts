@@ -54,16 +54,14 @@ export const forgotPasswordHandler = async (
   // Сохраняем в Redis с TTL 1 час
   await redis.set(redisKey, JSON.stringify(payload), 'EX', RESET_TOKEN_TTL_SECONDS);
 
-  // Формируем ссылку на страницу сброса пароля
-  // Берем первый разрешенный cors origin или дефолтный URL
-  const origin = Array.isArray(config.CORS_ORIGINS) && config.CORS_ORIGINS[0]
-    ? config.CORS_ORIGINS[0]
-    : 'https://ijarauz.uz';
-  const resetLink = `${origin}/ru/reset-password?token=${resetToken}`;
+  // Формируем ссылку на страницу сброса пароля с использованием PUBLIC_SITE_URL и локали пользователя
+  const siteBase = (config.PUBLIC_SITE_URL || 'https://ijarauz.uz').replace(/\/+$/, '');
+  const userLocale = dto.locale || 'ru';
+  const resetLink = `${siteBase}/${userLocale}/reset-password?token=${resetToken}`;
 
   // Логируем в консоль / логгер (особенно полезно для разработки и отладки)
   request.log.info(
-    { userId: user.id, email: user.email, resetLink },
+    { userId: user.id, email: user.email, resetLink, siteBase, userLocale },
     `[ForgotPassword] Reset link generated for ${user.email}`,
   );
 
@@ -75,6 +73,7 @@ export const forgotPasswordHandler = async (
         adminChatId,
         `🔐 <b>Запрос на сброс пароля</b>\n\n` +
         `👤 Пользователь: <b>${user.name}</b> (${user.email})\n` +
+        `🌐 Локаль: <code>${userLocale}</code>\n` +
         `🔗 Ссылка для сброса:\n<code>${resetLink}</code>\n\n` +
         `<i>Ссылка действительна 1 час.</i>`,
         'HTML',
@@ -86,6 +85,42 @@ export const forgotPasswordHandler = async (
   // Если настроен Resend API для отправки почты
   if (config.RESEND_API_KEY) {
     try {
+      const emailSubject = userLocale === 'uz'
+        ? 'Ijarauz saytida parolni tiklash'
+        : userLocale === 'en'
+        ? 'Password Reset on Ijarauz'
+        : 'Сброс пароля на сайте Ijarauz';
+
+      const emailHeading = userLocale === 'uz'
+        ? 'Parolni tiklash'
+        : userLocale === 'en'
+        ? 'Password Recovery'
+        : 'Восстановление пароля';
+
+      const emailGreeting = userLocale === 'uz'
+        ? `Assalomu alaykum, ${user.name}!`
+        : userLocale === 'en'
+        ? `Hello, ${user.name}!`
+        : `Здравствуйте, ${user.name}!`;
+
+      const emailBody = userLocale === 'uz'
+        ? 'Siz Ijarauz platformasidagi hisobingiz parolini tiklashni so‘radingiz.'
+        : userLocale === 'en'
+        ? 'You received this email because you requested a password reset for your Ijarauz account.'
+        : 'Вы получили это письмо, потому что запросили сброс пароля для своей учетной записи на платформе Ijarauz.';
+
+      const buttonText = userLocale === 'uz'
+        ? 'Parolni tiklash'
+        : userLocale === 'en'
+        ? 'Reset Password'
+        : 'Сбросить пароль';
+
+      const emailFooter = userLocale === 'uz'
+        ? 'Havola 1 soat davomida amal qiladi. Agar siz so‘rov yubormagan bo‘lsangiz, ushbu xatga e’tibor bermang.'
+        : userLocale === 'en'
+        ? 'This link is valid for 1 hour. If you did not request this, please ignore this email.'
+        : 'Ссылка действительна в течение 1 часа. Если вы не запрашивали смену пароля, просто проигнорируйте это письмо.';
+
       await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -95,19 +130,19 @@ export const forgotPasswordHandler = async (
         body: JSON.stringify({
           from: 'Ijarauz Security <noreply@ijarauz.uz>',
           to: [user.email],
-          subject: 'Сброс пароля на сайте Ijarauz',
+          subject: emailSubject,
           html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #f9fafb; border-radius: 8px;">
-              <h2 style="color: #111827;">Восстановление пароля</h2>
-              <p style="color: #4b5563;">Здравствуйте, ${user.name}!</p>
-              <p style="color: #4b5563;">Вы получили это письмо, потому что запросили сброс пароля для своей учетной записи на платформе Ijarauz.</p>
+              <h2 style="color: #111827;">${emailHeading}</h2>
+              <p style="color: #4b5563;">${emailGreeting}</p>
+              <p style="color: #4b5563;">${emailBody}</p>
               <div style="margin: 28px 0;">
                 <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                  Сбросить пароль
+                  ${buttonText}
                 </a>
               </div>
-              <p style="color: #6b7280; font-size: 14px;">Или перейдите по ссылке вручную: <br><a href="${resetLink}" style="color: #2563eb;">${resetLink}</a></p>
-              <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">Ссылка действительна в течение 1 часа. Если вы не запрашивали смену пароля, просто проигнорируйте это письмо.</p>
+              <p style="color: #6b7280; font-size: 14px;">Ссылка: <br><a href="${resetLink}" style="color: #2563eb;">${resetLink}</a></p>
+              <p style="color: #9ca3af; font-size: 12px; margin-top: 30px;">${emailFooter}</p>
             </div>
           `,
         }),
@@ -115,6 +150,11 @@ export const forgotPasswordHandler = async (
     } catch (err) {
       request.log.error({ err }, '[ForgotPassword] Error sending email via Resend');
     }
+  } else {
+    request.log.warn(
+      { userId: user.id, email: user.email },
+      '[ForgotPassword] RESEND_API_KEY не настроен — email со ссылкой сброса НЕ отправлен пользователю!',
+    );
   }
 
   return reply.send({
