@@ -268,6 +268,10 @@ export const chatModule = async (server: FastifyInstance) => {
         },
       });
 
+      return reply.send({ success: true });
+    },
+  );
+
   /**
    * DELETE /chat/messages/:id
    * Удалить сообщение (только автор)
