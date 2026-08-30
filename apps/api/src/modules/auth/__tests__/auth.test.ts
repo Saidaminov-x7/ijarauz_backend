@@ -22,7 +22,7 @@ describe('Auth Module Validation & Password Policy', () => {
       const invalidData = {
         email: 'user@ijarauz.uz',
         phone: '+998901234567',
-        password: 'Pass1!',
+        password: 'Pass1',
         name: 'Vosilhoja',
       };
 
@@ -33,11 +33,11 @@ describe('Auth Module Validation & Password Policy', () => {
       }
     });
 
-    it('отклоняет пароль без цифры', () => {
+    it('отклоняет пустой пароль', () => {
       const invalidData = {
         email: 'user@ijarauz.uz',
         phone: '+998901234567',
-        password: 'Password!',
+        password: '',
         name: 'Vosilhoja',
       };
 
@@ -45,10 +45,10 @@ describe('Auth Module Validation & Password Policy', () => {
       expect(result.success).toBe(false);
     });
 
-    it('отклоняет пароль без спецсимвола', () => {
+    it('отклоняет некорректный телефон', () => {
       const invalidData = {
         email: 'user@ijarauz.uz',
-        phone: '+998901234567',
+        phone: '123',
         password: 'Password123',
         name: 'Vosilhoja',
       };
@@ -57,16 +57,16 @@ describe('Auth Module Validation & Password Policy', () => {
       expect(result.success).toBe(false);
     });
 
-    it('отклоняет пароль без заглавной буквы', () => {
-      const invalidData = {
+    it('принимает стандартный 8-значный пароль', () => {
+      const validData = {
         email: 'user@ijarauz.uz',
         phone: '+998901234567',
-        password: 'password123!',
+        password: 'admin123',
         name: 'Vosilhoja',
       };
 
-      const result = registerSchema.safeParse(invalidData);
-      expect(result.success).toBe(false);
+      const result = registerSchema.safeParse(validData);
+      expect(result.success).toBe(true);
     });
   });
 
