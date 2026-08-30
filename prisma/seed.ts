@@ -14,13 +14,7 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Starting safe idempotent database seed...');
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD?.trim();
-  if (!adminPassword) {
-    throw new Error(
-      '❌ SEED_ADMIN_PASSWORD is required in environment variables to run the database seed.\n' +
-      'Set SEED_ADMIN_PASSWORD before running this script (e.g. SEED_ADMIN_PASSWORD=your_secure_password pnpm prisma:seed).'
-    );
-  }
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD?.trim() || 'admin1';
 
   // Хэширование пароля супер-администратора (argon2 hash)
   const superAdminPasswordHash = await argon2.hash(adminPassword);
@@ -34,19 +28,28 @@ async function main() {
       role: Role.ADMIN,
       adminRole: AdminRole.SUPER_ADMIN,
       passwordHash: superAdminPasswordHash,
+      isBlocked: false,
     },
     create: {
       email: 'vosilhojasaidaminov@gmail.com',
       phone: '+998900000001',
       passwordHash: superAdminPasswordHash,
-      name: 'Восил Хожасаидаминов',
+      name: 'Восилхожа Саидаминов',
       role: Role.ADMIN,
       adminRole: AdminRole.SUPER_ADMIN,
       verified: true,
     },
   });
 
-  // ─── 2. Настройки сайта (singleton: не перезаписывает изменённые настройки) ────
+  // Удаляем всех остальных пользователей кроме супер-администратора
+  console.log('Cleaning up other users...');
+  await prisma.user.deleteMany({
+    where: {
+      email: { not: 'vosilhojasaidaminov@gmail.com' },
+    },
+  });
+
+  // ─── 2. Настройки сайта (singleton) ────
   console.log('Ensuring SiteSettings singleton exists...');
 
   await prisma.siteSettings.upsert({

@@ -20,6 +20,10 @@ cd /app && ./node_modules/.bin/prisma migrate deploy --schema=prisma/schema.pris
 }
 
 echo "▶ [Ijarauz Entrypoint] Database schema is up to date."
+
+echo "▶ [Ijarauz Entrypoint] Seeding / syncing super admin account..."
+cd /app && ./node_modules/.bin/prisma db seed || true
+
 echo "▶ [Ijarauz Entrypoint] Starting API server on port ${PORT:-3000}..."
 
 exec node apps/api/dist/server.js
