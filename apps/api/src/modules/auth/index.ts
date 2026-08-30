@@ -8,9 +8,31 @@ import { refreshHandler } from './refresh';
 import { logoutHandler } from './logout';
 import { meHandler } from './me';
 import { googleAuthHandler } from './google';
+import { forgotPasswordHandler, resetPasswordHandler } from './forgot-password';
 import { authMiddleware } from '../../lib/authMiddleware';
 
 export const authModule: FastifyPluginAsync = async (server) => {
+  // Запрос на сброс пароля (rate limit: 5 запросов за 15 минут с одного IP)
+  server.post('/forgot-password', {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: '15 minutes',
+        keyGenerator: (req) => `${req.ip}:${(req.body as any)?.email || 'unknown'}`,
+      },
+    },
+  }, forgotPasswordHandler);
+
+  // Сброс пароля по токену
+  server.post('/reset-password', {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '15 minutes',
+      },
+    },
+  }, resetPasswordHandler);
+
   // Регистрация нового пользователя
   server.post('/register', {
     config: {

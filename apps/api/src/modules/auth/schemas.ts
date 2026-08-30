@@ -39,3 +39,16 @@ export const resend2faSchema = z.object({
 });
 
 export type Resend2faDto = z.infer<typeof resend2faSchema>;
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email('Invalid email address').max(255),
+});
+
+export type ForgotPasswordDto = z.infer<typeof forgotPasswordSchema>;
+
+export const resetPasswordSchema = z.object({
+  token: z.string().min(10, 'Invalid or expired token'),
+  password: z.string().min(8, 'Password must be at least 8 characters').max(100),
+});
+
+export type ResetPasswordDto = z.infer<typeof resetPasswordSchema>;
