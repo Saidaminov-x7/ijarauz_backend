@@ -316,8 +316,37 @@ export class ListingsService {
       this.prisma.listing.count({ where }),
     ]);
 
+    const listingIds = items.map((i) => i.id);
+    let listingReviewMap = new Map<string, { rating: number; reviewsCount: number }>();
+    if (listingIds.length > 0) {
+      const reviewsGroup = await this.prisma.review.groupBy({
+        by: ['listingId'],
+        where: { listingId: { in: listingIds } },
+        _avg: { rating: true },
+        _count: { id: true },
+      });
+      for (const r of reviewsGroup) {
+        if (r.listingId) {
+          listingReviewMap.set(r.listingId, {
+            rating: r._avg.rating ? Number(r._avg.rating.toFixed(1)) : 5.0,
+            reviewsCount: r._count.id,
+          });
+        }
+      }
+    }
+
+    const enrichedItems = items.map((item) => {
+      const rev = listingReviewMap.get(item.id);
+      return {
+        ...item,
+        rating: rev ? rev.rating : 5.0,
+        reviews: rev ? rev.reviewsCount : 0,
+        reviewsCount: rev ? rev.reviewsCount : 0,
+      };
+    });
+
     const result = {
-      items,
+      items: enrichedItems,
       meta: {
         total,
         page,
@@ -336,7 +365,7 @@ export class ListingsService {
   /**
    * Получить одно объявление по ID (инкремент просмотров)
    */
-  async findById(id: string, incrementViews = false): Promise<Listing | null> {
+  async findById(id: string, incrementViews = false): Promise<any | null> {
     const visibilityWhere: Prisma.ListingWhereInput = {
       id,
       status: ListingStatus.ACTIVE,
@@ -344,22 +373,13 @@ export class ListingsService {
     };
     if (incrementViews) {
       // Атомарный инкремент без дополнительного запроса
-      const updated = await this.prisma.listing.updateMany({
+      await this.prisma.listing.updateMany({
         where: visibilityWhere,
         data: { viewsCount: { increment: 1 } },
       });
-      if (updated.count === 0) return null;
-      return this.prisma.listing.findFirst({
-        where: visibilityWhere,
-        include: {
-          owner: { select: { id: true, name: true, avatar: true, phone: true } },
-          images: true,
-          _count: { select: { favorites: true } },
-        },
-      });
     }
 
-    return this.prisma.listing.findFirst({
+    const listing = await this.prisma.listing.findFirst({
       where: visibilityWhere,
       include: {
         owner: { select: { id: true, name: true, avatar: true, phone: true } },
@@ -367,6 +387,46 @@ export class ListingsService {
         _count: { select: { favorites: true } },
       },
     });
+
+    if (!listing) return null;
+
+    // Вычисляем реальный рейтинг объявления и арендодателя
+    const [listingReviewAgg, landlordReviewAgg] = await Promise.all([
+      this.prisma.review.aggregate({
+        where: { listingId: id },
+        _avg: { rating: true },
+        _count: { id: true },
+      }),
+      this.prisma.review.aggregate({
+        where: { landlordId: listing.ownerId },
+        _avg: { rating: true },
+        _count: { id: true },
+      }),
+    ]);
+
+    const listingRating = listingReviewAgg._avg.rating
+      ? Number(listingReviewAgg._avg.rating.toFixed(1))
+      : (landlordReviewAgg._avg.rating ? Number(landlordReviewAgg._avg.rating.toFixed(1)) : 5.0);
+    const listingReviewsCount = listingReviewAgg._count.id || 0;
+
+    const landlordRating = landlordReviewAgg._avg.rating
+      ? Number(landlordReviewAgg._avg.rating.toFixed(1))
+      : 5.0;
+    const landlordReviewsCount = landlordReviewAgg._count.id || 0;
+
+    return {
+      ...listing,
+      rating: listingRating,
+      reviews: listingReviewsCount,
+      reviewsCount: listingReviewsCount,
+      owner: listing.owner
+        ? {
+            ...listing.owner,
+            rating: landlordRating,
+            reviewsCount: landlordReviewsCount,
+          }
+        : null,
+    };
   }
 
   /**

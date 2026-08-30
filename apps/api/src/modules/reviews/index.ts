@@ -54,11 +54,24 @@ export const reviewsModule = async (server: FastifyInstance) => {
       ? Number((reviews.reduce((acc, r) => acc + r.rating, 0) / totalReviews).toFixed(1))
       : 5.0;
 
+    // Вычисляем общий рейтинг арендодателя по всем его объектам
+    const landlordAgg = await prisma.review.aggregate({
+      where: { landlordId: listing.ownerId },
+      _avg: { rating: true },
+      _count: { id: true },
+    });
+    const landlordRating = landlordAgg._avg.rating
+      ? Number(landlordAgg._avg.rating.toFixed(1))
+      : averageRating;
+    const landlordTotalReviews = landlordAgg._count.id || totalReviews;
+
     return reply.send({
       listingId,
       ownerId: listing.ownerId,
       averageRating,
       totalReviews,
+      landlordRating,
+      landlordTotalReviews,
       items: reviews.map((r) => ({
         id: r.id,
         author: r.author.name || 'Анонимный арендатор',
@@ -121,6 +134,23 @@ export const reviewsModule = async (server: FastifyInstance) => {
         },
       });
 
+      // Пересчитываем средний рейтинг
+      const listingAgg = await prisma.review.aggregate({
+        where: {
+          OR: [
+            { listingId },
+            { landlordId: listing.ownerId },
+          ],
+        },
+        _avg: { rating: true },
+        _count: { id: true },
+      });
+
+      const updatedAverageRating = listingAgg._avg.rating
+        ? Number(listingAgg._avg.rating.toFixed(1))
+        : review.rating;
+      const updatedTotalReviews = listingAgg._count.id || 1;
+
       return reply.status(201).send({
         id: review.id,
         author: review.author.name || 'Вы (Арендатор)',
@@ -128,7 +158,52 @@ export const reviewsModule = async (server: FastifyInstance) => {
         rating: review.rating,
         comment: review.comment,
         createdAt: review.createdAt.toISOString(),
+        averageRating: updatedAverageRating,
+        totalReviews: updatedTotalReviews,
       });
     },
   );
+
+  /**
+   * GET /users/:id/rating
+   * Получить рейтинг и отзывы конкретного продавца/пользователя
+   */
+  server.get<{ Params: { id: string } }>('/users/:id/rating', async (request, reply) => {
+    const { id: userId } = request.params;
+
+    const [agg, recentReviews] = await Promise.all([
+      prisma.review.aggregate({
+        where: { landlordId: userId },
+        _avg: { rating: true },
+        _count: { id: true },
+      }),
+      prisma.review.findMany({
+        where: { landlordId: userId },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+        include: {
+          author: {
+            select: { id: true, name: true, avatar: true },
+          },
+        },
+      }),
+    ]);
+
+    const averageRating = agg._avg.rating ? Number(agg._avg.rating.toFixed(1)) : 5.0;
+    const totalReviews = agg._count.id || 0;
+
+    return reply.send({
+      userId,
+      averageRating,
+      totalReviews,
+      items: recentReviews.map((r) => ({
+        id: r.id,
+        author: r.author.name || 'Арендатор',
+        authorAvatar: r.author.avatar,
+        rating: r.rating,
+        comment: r.comment,
+        createdAt: r.createdAt.toISOString(),
+      })),
+    });
+  });
 };
